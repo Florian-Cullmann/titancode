@@ -15,8 +15,8 @@
         <span>TitanCode</span>
       </a>
       <nav>
-        <a class="active" href="#"><span>⌂</span>Übersicht</a>
-        <a href="#"><span>↯</span>Änderungen</a>
+        <a class="active" href="/" data-route="overview"><span>⌂</span>Übersicht</a>
+        <a href="/changes" data-route="changes"><span>↯</span>Änderungen</a>
         <a href="#"><span>⌘</span>Code</a>
         <a href="#"><span>△</span>Tests</a>
         <a href="#"><span>◇</span>Architektur</a>
@@ -47,6 +47,7 @@
       </header>
 
       <div class="content">
+        <div id="overview-view">
         <section class="hero">
           <div>
             <p class="eyebrow">PROJEKTÜBERSICHT</p>
@@ -96,7 +97,7 @@
             <article class="panel changes">
               <div class="panel-heading">
                 <div class="title-row"><h2>Aktuelle Änderungen</h2><span id="change-count" class="count">0</span></div>
-                <button type="button">Review öffnen <span>→</span></button>
+                <button type="button" data-open-review>Review öffnen <span>→</span></button>
               </div>
               <div id="changes" class="change-list empty">
                 <div class="empty-state">Working Tree wird gelesen …</div>
@@ -127,10 +128,57 @@
             </article>
           </aside>
         </section>
+        </div>
+
+        <div id="changes-view" class="view-hidden">
+          <section class="review-hero">
+            <div>
+              <p class="eyebrow">CHANGE REVIEW</p>
+              <h1>Aktuelle Änderungen</h1>
+              <p id="review-summary">Working Tree wird gelesen …</p>
+            </div>
+            <button class="secondary-button" type="button" data-route-button="overview">← Übersicht</button>
+          </section>
+
+          <section class="review-workspace">
+            <aside class="review-files panel">
+              <div class="review-files-head">
+                <div class="title-row"><h2>Dateien</h2><span id="review-count" class="count">0</span></div>
+                <div class="review-filter">
+                  <button class="active" type="button" data-filter="all">Alle</button>
+                  <button type="button" data-filter="working">Working</button>
+                  <button type="button" data-filter="staged">Staged</button>
+                </div>
+              </div>
+              <div id="review-files-list" class="review-files-list"></div>
+            </aside>
+
+            <article class="diff-panel panel">
+              <div class="diff-toolbar">
+                <div class="diff-title">
+                  <strong id="diff-path">Keine Datei ausgewählt</strong>
+                  <span id="diff-status"></span>
+                </div>
+                <div class="diff-actions">
+                  <div class="mode-switch" role="group" aria-label="Diff-Bereich">
+                    <button class="active" type="button" data-mode="working">Working Tree</button>
+                    <button type="button" data-mode="staged">Staged</button>
+                  </div>
+                  <button id="git-action" class="primary-button" type="button" disabled>Stagen</button>
+                </div>
+              </div>
+              <div id="diff-meta" class="diff-meta">
+                <span>Wähle links eine geänderte Datei aus.</span>
+              </div>
+              <div id="diff-content" class="diff-content empty-diff">
+                <div class="diff-placeholder"><span>↯</span><strong>Noch kein Diff ausgewählt</strong><small>Wähle eine Datei, um ihre Änderungen zu prüfen.</small></div>
+              </div>
+            </article>
+          </section>
+        </div>
       </div>
     </main>
   </div>
   <script src="/app.js"></script>
 </body>
 </html>
-

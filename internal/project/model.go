@@ -43,6 +43,16 @@ type Change struct {
 	Status     string `json:"status"`
 	Insertions int    `json:"insertions"`
 	Deletions  int    `json:"deletions"`
+	Staged     bool   `json:"staged"`
+	Unstaged   bool   `json:"unstaged"`
+}
+
+type Diff struct {
+	Path      string `json:"path"`
+	Mode      string `json:"mode"`
+	Content   string `json:"content"`
+	Binary    bool   `json:"binary"`
+	Truncated bool   `json:"truncated"`
 }
 
 type Language struct {

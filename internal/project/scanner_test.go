@@ -91,6 +91,25 @@ func TestScannerReadsGitWorkingTree(t *testing.T) {
 	}
 }
 
+func TestScannerUsesRenameDestination(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init", "-b", "main")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test User")
+	writeTestFile(t, filepath.Join(root, "before.go"), "package example\n")
+	runGit(t, root, "add", "before.go")
+	runGit(t, root, "commit", "-m", "initial")
+	runGit(t, root, "mv", "before.go", "after.go")
+
+	snapshot, err := NewScanner(root).Scan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Changes) != 1 || snapshot.Changes[0].Path != "after.go" {
+		t.Fatalf("unexpected rename: %#v", snapshot.Changes)
+	}
+}
+
 func TestModuleFor(t *testing.T) {
 	tests := map[string]string{
 		"main.go":                    ".",

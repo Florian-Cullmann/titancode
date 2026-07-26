@@ -292,21 +292,20 @@ func (s *Scanner) gitChanges(ctx context.Context) []Change {
 		code := string(record[:2])
 		path := string(record[3:])
 		if code[0] == 'R' || code[0] == 'C' {
+			// In -z output Git emits the destination first and the source next.
 			index++
-			if index < len(records) && len(records[index]) > 0 {
-				path = string(records[index])
-			}
 		}
-		change := Change{Path: filepath.ToSlash(path), Status: changeStatus(code)}
+		change := Change{
+			Path: filepath.ToSlash(path), Status: changeStatus(code),
+			Staged:   code[0] != ' ' && code[0] != '?',
+			Unstaged: code[1] != ' ' || code == "??",
+		}
 		if stat, ok := stats[path]; ok {
 			change.Insertions, change.Deletions = stat[0], stat[1]
 		}
 		changes = append(changes, change)
 	}
 	sort.Slice(changes, func(i, j int) bool { return changes[i].Path < changes[j].Path })
-	if len(changes) > 12 {
-		changes = changes[:12]
-	}
 	return changes
 }
 

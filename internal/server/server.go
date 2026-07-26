@@ -6,9 +6,11 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -37,16 +39,93 @@ func New(scanner *project.Scanner) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/snapshot", server.snapshot)
 	mux.HandleFunc("GET /api/events", server.events)
+	mux.HandleFunc("GET /api/diff", server.diff)
+	mux.HandleFunc("POST /api/git/stage", server.stage)
+	mux.HandleFunc("POST /api/git/unstage", server.unstage)
 	content, _ := fs.Sub(webFiles, "web")
+	mux.HandleFunc("GET /changes", serveIndex(content))
 	mux.Handle("/", http.FileServer(http.FS(content)))
 	return securityHeaders(mux)
+}
+
+func serveIndex(content fs.FS) http.HandlerFunc {
+	return func(writer http.ResponseWriter, _ *http.Request) {
+		index, err := fs.ReadFile(content, "index.html")
+		if err != nil {
+			http.Error(writer, "application unavailable", http.StatusInternalServerError)
+			return
+		}
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = writer.Write(index)
+	}
+}
+
+func (s *Server) diff(writer http.ResponseWriter, request *http.Request) {
+	diff, err := s.scanner.Diff(request.Context(), request.URL.Query().Get("path"), request.URL.Query().Get("mode"))
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, diff)
+}
+
+func (s *Server) stage(writer http.ResponseWriter, request *http.Request) {
+	s.gitAction(writer, request, s.scanner.Stage)
+}
+
+func (s *Server) unstage(writer http.ResponseWriter, request *http.Request) {
+	s.gitAction(writer, request, s.scanner.Unstage)
+}
+
+func (s *Server) gitAction(
+	writer http.ResponseWriter,
+	request *http.Request,
+	action func(context.Context, string) error,
+) {
+	if !sameOrigin(request) {
+		writeError(writer, http.StatusForbidden, errors.New("cross-origin request rejected"))
+		return
+	}
+	var payload struct {
+		Path string `json:"path"`
+	}
+	request.Body = http.MaxBytesReader(writer, request.Body, 4096)
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		writeError(writer, http.StatusBadRequest, errors.New("invalid request body"))
+		return
+	}
+	if err := action(request.Context(), payload.Path); err != nil {
+		writeError(writer, http.StatusBadRequest, err)
+		return
+	}
+	s.refresh(request.Context())
+	writeJSON(writer, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) snapshot(writer http.ResponseWriter, _ *http.Request) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	writeJSON(writer, http.StatusOK, s.current)
+}
+
+func sameOrigin(request *http.Request) bool {
+	origin := request.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	return err == nil && parsed.Host == request.Host &&
+		(parsed.Scheme == "http" || parsed.Scheme == "https")
+}
+
+func writeJSON(writer http.ResponseWriter, status int, value any) {
 	writer.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(writer).Encode(s.current)
+	writer.WriteHeader(status)
+	_ = json.NewEncoder(writer).Encode(value)
+}
+
+func writeError(writer http.ResponseWriter, status int, err error) {
+	writeJSON(writer, status, map[string]string{"error": err.Error()})
 }
 
 func (s *Server) events(writer http.ResponseWriter, request *http.Request) {

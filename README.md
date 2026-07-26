@@ -30,6 +30,8 @@ layer that stays useful alongside any CLI-based agent.
 - local web dashboard served by a single background process
 - continuous repository scanning with live browser updates
 - Git branch, working-tree status, and diff statistics
+- unified review for working-tree and staged changes
+- per-file stage and unstage actions
 - repository areas grouped by file and code size
 - language distribution and source-file statistics
 - `.gitignore`-aware scanning
@@ -203,4 +205,3 @@ instead of opening a public issue.
 
 No open-source license has been selected yet. Until a license is added, all rights
 remain with the copyright holder.
-
