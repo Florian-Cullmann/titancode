@@ -18,7 +18,11 @@ import (
 
 var ignoredDirectories = map[string]bool{
 	".git": true, ".idea": true, ".vscode": true, "node_modules": true,
+	".venv": true, "venv": true, "env": true,
+	"__pycache__": true, ".pytest_cache": true, ".mypy_cache": true,
+	".ruff_cache": true, ".tox": true, ".nox": true,
 	"dist": true, "build": true, "target": true, "vendor": true, "coverage": true,
+	".next": true, ".nuxt": true, ".svelte-kit": true, ".turbo": true,
 }
 
 var languages = map[string]struct{ name, color string }{
@@ -50,6 +54,8 @@ func (s *Scanner) Scan(ctx context.Context) (Snapshot, error) {
 		Changes:   make([]Change, 0),
 		Languages: make([]Language, 0),
 	}
+	snapshot.Project.Branch, snapshot.Project.IsGit = s.gitBranch(ctx)
+	visibleFiles, visibleDirectories := s.gitVisiblePaths(ctx)
 	type languageCount struct {
 		files int
 		lines int
@@ -71,11 +77,21 @@ func (s *Scanner) Scan(ctx context.Context) (Snapshot, error) {
 			if path != s.root && ignoredDirectories[entry.Name()] {
 				return filepath.SkipDir
 			}
+			if path != s.root && visibleDirectories != nil {
+				relative, err := filepath.Rel(s.root, path)
+				if err == nil && !visibleDirectories[filepath.ToSlash(relative)] {
+					return filepath.SkipDir
+				}
+			}
 			return nil
 		}
 
 		relative, err := filepath.Rel(s.root, path)
 		if err != nil {
+			return nil
+		}
+		relative = filepath.ToSlash(relative)
+		if visibleFiles != nil && !visibleFiles[relative] {
 			return nil
 		}
 		snapshot.Summary.Files++
@@ -115,7 +131,6 @@ func (s *Scanner) Scan(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 
-	snapshot.Project.Branch, snapshot.Project.IsGit = s.gitBranch(ctx)
 	snapshot.Changes = s.gitChanges(ctx)
 	if snapshot.Changes == nil {
 		snapshot.Changes = make([]Change, 0)
@@ -164,6 +179,34 @@ func (s *Scanner) Scan(ctx context.Context) (Snapshot, error) {
 	snapshot.ScannedAt = time.Now()
 	snapshot.Summary.LastScanMS = time.Since(start).Milliseconds()
 	return snapshot, nil
+}
+
+// gitVisiblePaths returns files Git considers part of the working tree: tracked
+// files plus untracked files that are not excluded by standard ignore rules.
+// A nil result means the directory is not a Git work tree.
+func (s *Scanner) gitVisiblePaths(ctx context.Context) (map[string]bool, map[string]bool) {
+	output, err := s.git(ctx, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, nil
+	}
+	files := make(map[string]bool)
+	directories := map[string]bool{".": true}
+	for _, record := range bytes.Split(output, []byte{0}) {
+		if len(record) == 0 {
+			continue
+		}
+		path := filepath.ToSlash(string(record))
+		files[path] = true
+		directory := filepath.ToSlash(filepath.Dir(path))
+		for {
+			directories[directory] = true
+			if directory == "." {
+				break
+			}
+			directory = filepath.ToSlash(filepath.Dir(directory))
+		}
+	}
+	return files, directories
 }
 
 func countLines(path string) (int, error) {

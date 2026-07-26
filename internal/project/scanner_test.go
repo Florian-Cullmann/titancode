@@ -16,6 +16,7 @@ func TestScannerBuildsRepositorySnapshot(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "internal", "orders", "service.go"), "package orders\n\ntype Service struct{}\n")
 	writeTestFile(t, filepath.Join(root, "README.md"), "# Project\n")
 	writeTestFile(t, filepath.Join(root, "node_modules", "ignored.js"), "const ignored = true;\n")
+	writeTestFile(t, filepath.Join(root, ".venv", "lib", "site-packages", "ignored.py"), "ignored = True\n")
 
 	snapshot, err := NewScanner(root).Scan(context.Background())
 	if err != nil {
@@ -36,6 +37,30 @@ func TestScannerBuildsRepositorySnapshot(t *testing.T) {
 	}
 	if snapshot.Project.Name != filepath.Base(root) {
 		t.Fatalf("project name = %q", snapshot.Project.Name)
+	}
+}
+
+func TestScannerRespectsGitIgnoreRules(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init", "-b", "main")
+	writeTestFile(t, filepath.Join(root, ".gitignore"), "generated/\n*.secret.py\n")
+	writeTestFile(t, filepath.Join(root, "app.py"), "print('visible')\n")
+	writeTestFile(t, filepath.Join(root, "generated", "client.py"), "print('generated')\n")
+	writeTestFile(t, filepath.Join(root, "credentials.secret.py"), "TOKEN = 'ignored'\n")
+
+	snapshot, err := NewScanner(root).Scan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if snapshot.Summary.Files != 2 {
+		t.Fatalf("files = %d, want 2 (.gitignore and app.py)", snapshot.Summary.Files)
+	}
+	if snapshot.Summary.SourceFiles != 1 {
+		t.Fatalf("source files = %d, want 1", snapshot.Summary.SourceFiles)
+	}
+	if snapshot.Summary.CodeLines != 1 {
+		t.Fatalf("code lines = %d, want 1", snapshot.Summary.CodeLines)
 	}
 }
 
