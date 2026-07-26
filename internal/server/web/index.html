@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>TitanCode</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="TitanCode">
+        <span class="brand-mark">T</span>
+        <span>TitanCode</span>
+      </a>
+      <nav>
+        <a class="active" href="#"><span>⌂</span>Übersicht</a>
+        <a href="#"><span>↯</span>Änderungen</a>
+        <a href="#"><span>⌘</span>Code</a>
+        <a href="#"><span>△</span>Tests</a>
+        <a href="#"><span>◇</span>Architektur</a>
+        <a href="#"><span>◉</span>Qualität</a>
+        <a href="#"><span>◷</span>Aktivität</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="daemon"><i></i><span>Daemon läuft</span></div>
+        <span class="version">v0.1.0-dev</span>
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <div class="project">
+          <span class="project-icon">⌬</span>
+          <div>
+            <strong id="project-name">Repository</strong>
+            <small id="project-path">Wird geladen …</small>
+          </div>
+          <span id="branch" class="branch">main</span>
+          <span class="live"><i></i> Live</span>
+        </div>
+        <div class="header-actions">
+          <button class="search" type="button">⌕ <span>Code und Symbole durchsuchen</span><kbd>⌘ K</kbd></button>
+          <button class="icon-button" aria-label="Einstellungen">⚙</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <section class="hero">
+          <div>
+            <p class="eyebrow">PROJEKTÜBERSICHT</p>
+            <h1>Was verdient deine Aufmerksamkeit?</h1>
+            <p id="summary-copy">TitanCode analysiert gerade das Repository.</p>
+          </div>
+          <span id="updated-at" class="updated">Verbinde …</span>
+        </section>
+
+        <section class="metrics" aria-label="Projektmetriken">
+          <article class="metric">
+            <div class="metric-head"><span class="metric-icon blue">▱</span><span>Quelldateien</span></div>
+            <strong id="metric-files">—</strong>
+            <small id="metric-all-files">Repository wird gescannt</small>
+            <div class="spark blue-spark"></div>
+          </article>
+          <article class="metric">
+            <div class="metric-head"><span class="metric-icon green">≋</span><span>Codezeilen</span></div>
+            <strong id="metric-lines">—</strong>
+            <small>Erkannte Quellsprachen</small>
+            <div class="spark green-spark"></div>
+          </article>
+          <article class="metric">
+            <div class="metric-head"><span class="metric-icon purple">◇</span><span>Module</span></div>
+            <strong id="metric-modules">—</strong>
+            <small>Logische Repository-Bereiche</small>
+            <div class="spark purple-spark"></div>
+          </article>
+          <article class="metric">
+            <div class="metric-head"><span class="metric-icon amber">↯</span><span>Aktuelle Änderungen</span></div>
+            <strong id="metric-changes">—</strong>
+            <small id="metric-diff">Working Tree</small>
+            <div class="spark amber-spark"></div>
+          </article>
+        </section>
+
+        <section class="dashboard">
+          <div class="primary">
+            <article class="panel repository">
+              <div class="panel-heading">
+                <div><h2>Repository-Struktur</h2><p>Größte Bereiche nach Codeumfang</p></div>
+                <button type="button">Alle Bereiche <span>→</span></button>
+              </div>
+              <div id="modules" class="module-list skeleton-list"></div>
+            </article>
+
+            <article class="panel changes">
+              <div class="panel-heading">
+                <div class="title-row"><h2>Aktuelle Änderungen</h2><span id="change-count" class="count">0</span></div>
+                <button type="button">Review öffnen <span>→</span></button>
+              </div>
+              <div id="changes" class="change-list empty">
+                <div class="empty-state">Working Tree wird gelesen …</div>
+              </div>
+            </article>
+          </div>
+
+          <aside class="secondary">
+            <article class="panel attention">
+              <div class="panel-heading"><h2>Aufmerksamkeit</h2><span id="attention-count" class="count amber-count">0</span></div>
+              <div id="attention" class="attention-list">
+                <div class="empty-state">Noch keine Befunde</div>
+              </div>
+            </article>
+
+            <article class="panel languages-panel">
+              <div class="panel-heading"><div><h2>Sprachen</h2><p>Nach Codezeilen</p></div></div>
+              <div id="language-bar" class="language-bar"></div>
+              <div id="languages" class="language-list"></div>
+            </article>
+
+            <article class="panel activity">
+              <div class="panel-heading"><h2>Live-Analyse</h2><span class="pulse"></span></div>
+              <div class="activity-item">
+                <span class="activity-icon">✓</span>
+                <div><strong>Repository synchronisiert</strong><small id="scan-time">Warte auf ersten Scan</small></div>
+              </div>
+            </article>
+          </aside>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
+
