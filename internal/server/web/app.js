@@ -12,7 +12,10 @@ function escapeHTML(value) {
 }
 
 function render(snapshot) {
-  const { project, summary, modules, changes, languages, scannedAt } = snapshot;
+  const { project, summary, scannedAt } = snapshot;
+  const modules = snapshot.modules ?? [];
+  const changes = snapshot.changes ?? [];
+  const languages = snapshot.languages ?? [];
   $("#project-name").textContent = project.name;
   $("#project-path").textContent = project.path;
   $("#branch").textContent = project.isGit ? project.branch : "kein Git";
@@ -117,4 +120,3 @@ events.addEventListener("snapshot", event => render(JSON.parse(event.data)));
 events.onerror = () => { $(".live").lastChild.textContent = " Verbinde …"; };
 events.onopen = () => { $(".live").lastChild.textContent = " Live"; };
 initialLoad();
-

@@ -45,7 +45,10 @@ func (s *Scanner) Root() string { return s.root }
 func (s *Scanner) Scan(ctx context.Context) (Snapshot, error) {
 	start := time.Now()
 	snapshot := Snapshot{
-		Project: ProjectInfo{Name: filepath.Base(s.root), Path: s.root},
+		Project:   ProjectInfo{Name: filepath.Base(s.root), Path: s.root},
+		Modules:   make([]Module, 0),
+		Changes:   make([]Change, 0),
+		Languages: make([]Language, 0),
 	}
 	type languageCount struct {
 		files int
@@ -114,6 +117,9 @@ func (s *Scanner) Scan(ctx context.Context) (Snapshot, error) {
 
 	snapshot.Project.Branch, snapshot.Project.IsGit = s.gitBranch(ctx)
 	snapshot.Changes = s.gitChanges(ctx)
+	if snapshot.Changes == nil {
+		snapshot.Changes = make([]Change, 0)
+	}
 	for _, change := range snapshot.Changes {
 		snapshot.Summary.Insertions += change.Insertions
 		snapshot.Summary.Deletions += change.Deletions

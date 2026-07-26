@@ -2,9 +2,11 @@ package project
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -89,6 +91,24 @@ func TestCountLinesIncludesFinalLineWithoutNewline(t *testing.T) {
 	}
 	if lines != 1 {
 		t.Fatalf("lines = %d, want 1", lines)
+	}
+}
+
+func TestEmptyCollectionsAreEncodedAsArrays(t *testing.T) {
+	snapshot, err := NewScanner(t.TempDir()).Scan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(payload)
+	for _, field := range []string{`"modules":[]`, `"changes":[]`, `"languages":[]`} {
+		if !strings.Contains(encoded, field) {
+			t.Errorf("snapshot does not contain %s: %s", field, encoded)
+		}
 	}
 }
 
