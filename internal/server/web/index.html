@@ -18,7 +18,7 @@
         <a class="active" href="/" data-route="overview"><span>⌂</span>Übersicht</a>
         <a href="/changes" data-route="changes"><span>↯</span>Änderungen</a>
         <a href="#"><span>⌘</span>Code</a>
-        <a href="#"><span>△</span>Tests</a>
+        <a href="/tests" data-route="tests"><span>△</span>Tests</a>
         <a href="#"><span>◇</span>Architektur</a>
         <a href="#"><span>◉</span>Qualität</a>
         <a href="#"><span>◷</span>Aktivität</a>
@@ -38,7 +38,6 @@
             <small id="project-path">Wird geladen …</small>
           </div>
           <span id="branch" class="branch">main</span>
-          <span class="live"><i></i> Live</span>
         </div>
         <div class="header-actions">
           <button class="search" type="button">⌕ <span>Code und Symbole durchsuchen</span><kbd>⌘ K</kbd></button>
@@ -50,8 +49,7 @@
         <div id="overview-view">
         <section class="hero">
           <div>
-            <p class="eyebrow">PROJEKTÜBERSICHT</p>
-            <h1>Was verdient deine Aufmerksamkeit?</h1>
+            <h1>Projektübersicht</h1>
             <p id="summary-copy">TitanCode analysiert gerade das Repository.</p>
           </div>
           <span id="updated-at" class="updated">Verbinde …</span>
@@ -173,6 +171,47 @@
               <div id="diff-content" class="diff-content empty-diff">
                 <div class="diff-placeholder"><span>↯</span><strong>Noch kein Diff ausgewählt</strong><small>Wähle eine Datei, um ihre Änderungen zu prüfen.</small></div>
               </div>
+            </article>
+          </section>
+        </div>
+
+        <div id="tests-view" class="view-hidden">
+          <section class="review-hero">
+            <div>
+              <p class="eyebrow">TESTS</p>
+              <h1>Teststatus</h1>
+              <p id="test-summary">Testumgebung wird erkannt …</p>
+            </div>
+            <div class="test-actions">
+              <button id="cancel-tests" class="secondary-button view-hidden" type="button">Abbrechen</button>
+              <button id="run-tests" class="primary-button" type="button" disabled>Tests starten</button>
+            </div>
+          </section>
+
+          <section class="test-workspace">
+            <article class="panel test-overview">
+              <div class="panel-heading">
+                <div><h2>Letzter Testlauf</h2><p id="test-command">Noch kein Testbefehl erkannt</p></div>
+                <span id="test-status" class="test-status idle">Bereit</span>
+              </div>
+              <div class="test-metrics">
+                <div><strong id="test-packages">—</strong><small>Ergebnisse</small></div>
+                <div><strong id="test-passed">—</strong><small>Erfolgreich</small></div>
+                <div><strong id="test-failed">—</strong><small>Fehlgeschlagen</small></div>
+                <div><strong id="test-duration">—</strong><small>Laufzeit</small></div>
+              </div>
+            </article>
+
+            <article class="panel test-results">
+                <div class="panel-heading"><div><h2>Testergebnisse</h2><p>Pakete, Testfälle oder Zusammenfassungen des letzten Laufs</p></div></div>
+              <div id="test-packages-list" class="test-packages-list">
+                <div class="empty-state">Noch keine Tests ausgeführt</div>
+              </div>
+            </article>
+
+            <article class="panel test-output-panel">
+              <div class="panel-heading"><div><h2>Ausgabe</h2><p>Fehler und Diagnoseinformationen</p></div></div>
+              <pre id="test-output" class="test-output">Noch keine Ausgabe vorhanden.</pre>
             </article>
           </section>
         </div>

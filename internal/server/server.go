@@ -22,6 +22,7 @@ var webFiles embed.FS
 
 type Server struct {
 	scanner *project.Scanner
+	tester  *project.TestRunner
 	mu      sync.RWMutex
 	current project.Snapshot
 	hash    string
@@ -31,6 +32,7 @@ type Server struct {
 func New(scanner *project.Scanner) http.Handler {
 	server := &Server{
 		scanner: scanner,
+		tester:  project.NewTestRunner(scanner.Root()),
 		clients: make(map[chan []byte]struct{}),
 	}
 	server.refresh(context.Background())
@@ -42,10 +44,38 @@ func New(scanner *project.Scanner) http.Handler {
 	mux.HandleFunc("GET /api/diff", server.diff)
 	mux.HandleFunc("POST /api/git/stage", server.stage)
 	mux.HandleFunc("POST /api/git/unstage", server.unstage)
+	mux.HandleFunc("GET /api/tests", server.testState)
+	mux.HandleFunc("POST /api/tests/run", server.runTests)
+	mux.HandleFunc("POST /api/tests/cancel", server.cancelTests)
 	content, _ := fs.Sub(webFiles, "web")
 	mux.HandleFunc("GET /changes", serveIndex(content))
+	mux.HandleFunc("GET /tests", serveIndex(content))
 	mux.Handle("/", http.FileServer(http.FS(content)))
 	return securityHeaders(mux)
+}
+
+func (s *Server) testState(writer http.ResponseWriter, _ *http.Request) {
+	writeJSON(writer, http.StatusOK, s.tester.State())
+}
+
+func (s *Server) runTests(writer http.ResponseWriter, request *http.Request) {
+	s.testAction(writer, request, s.tester.Start)
+}
+
+func (s *Server) cancelTests(writer http.ResponseWriter, request *http.Request) {
+	s.testAction(writer, request, s.tester.Cancel)
+}
+
+func (s *Server) testAction(writer http.ResponseWriter, request *http.Request, action func() error) {
+	if !sameOrigin(request) {
+		writeError(writer, http.StatusForbidden, errors.New("cross-origin request rejected"))
+		return
+	}
+	if err := action(); err != nil {
+		writeError(writer, http.StatusConflict, err)
+		return
+	}
+	writeJSON(writer, http.StatusAccepted, s.tester.State())
 }
 
 func serveIndex(content fs.FS) http.HandlerFunc {

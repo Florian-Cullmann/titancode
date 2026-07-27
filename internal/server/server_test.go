@@ -41,7 +41,7 @@ func TestSnapshotEndpoint(t *testing.T) {
 
 func TestWebAppIsEmbedded(t *testing.T) {
 	handler := New(project.NewScanner(t.TempDir()))
-	for _, path := range []string{"/", "/changes?file=main.go"} {
+	for _, path := range []string{"/", "/changes?file=main.go", "/tests"} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		response := httptest.NewRecorder()
 
@@ -52,6 +52,37 @@ func TestWebAppIsEmbedded(t *testing.T) {
 		if body := response.Body.String(); len(body) < 100 || !contains(body, "TitanCode") {
 			t.Fatalf("embedded application was not served for %s", path)
 		}
+	}
+}
+
+func TestTestStateEndpointDetectsGoProject(t *testing.T) {
+	root := t.TempDir()
+	writeServerTestFile(t, filepath.Join(root, "go.mod"), "module example.com/project\n\ngo 1.26\n")
+	request := httptest.NewRequest(http.MethodGet, "/api/tests", nil)
+	response := httptest.NewRecorder()
+
+	New(project.NewScanner(root)).ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	var state project.TestState
+	if err := json.NewDecoder(response.Body).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if !state.Available || state.Framework != "Go" {
+		t.Fatalf("unexpected state: %#v", state)
+	}
+}
+
+func TestRunTestsRejectsUnsupportedProject(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/tests/run", nil)
+	response := httptest.NewRecorder()
+
+	New(project.NewScanner(t.TempDir())).ServeHTTP(response, request)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusConflict)
 	}
 }
 

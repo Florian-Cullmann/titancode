@@ -5,7 +5,7 @@ const compact = new Intl.NumberFormat("de-DE", { notation: "compact", maximumFra
 
 const state = {
   snapshot: null,
-  view: location.pathname === "/changes" ? "changes" : "overview",
+  view: location.pathname === "/changes" ? "changes" : location.pathname === "/tests" ? "tests" : "overview",
   selectedPath: new URLSearchParams(location.search).get("file"),
   mode: "working",
   filter: "all",
@@ -58,7 +58,13 @@ function renderOverview(snapshot) {
     ? modules.map(module => `
       <div class="module-row">
         <div class="module-main">
-          <i class="status-dot"></i><span class="folder">⌑</span>
+          <i class="status-dot"></i>
+          <span class="folder" aria-hidden="true">
+            <svg viewBox="0 0 24 20" fill="none">
+              <path d="M2.5 4.5h7l2-2h4.25c1.1 0 2 .9 2 2v1.25h1.75c1.1 0 2 .9 2 2v8.75c0 1.1-.9 2-2 2h-17c-1.1 0-2-.9-2-2v-10c0-1.1.9-2 2-2Z"/>
+              <path d="M1 6h18.5c1.1 0 2 .9 2 2"/>
+            </svg>
+          </span>
           <div class="module-name"><strong>${escapeHTML(module.name)}</strong><small>${escapeHTML(module.path)}</small></div>
         </div>
         <div class="datum"><span>${number.format(module.files)}</span><small>Dateien</small></div>
@@ -158,14 +164,20 @@ function openReview(path = null) {
 }
 
 function navigateOverview() {
-  state.view = "overview";
-  history.pushState({}, "", "/");
+  navigate("overview");
+}
+
+function navigate(view) {
+  state.view = view;
+  history.pushState({}, "", view === "overview" ? "/" : `/${view}`);
   applyRoute();
+  if (view === "tests") fetchTestState();
 }
 
 function applyRoute() {
   $("#overview-view").classList.toggle("view-hidden", state.view !== "overview");
   $("#changes-view").classList.toggle("view-hidden", state.view !== "changes");
+  $("#tests-view").classList.toggle("view-hidden", state.view !== "tests");
   $$("nav [data-route]").forEach(link => link.classList.toggle("active", link.dataset.route === state.view));
 }
 
@@ -341,10 +353,79 @@ async function fetchSnapshot() {
   render(await response.json());
 }
 
+async function fetchTestState() {
+  try {
+    const response = await fetch("/api/tests");
+    const testState = await response.json();
+    if (!response.ok) throw new Error(testState.error || "Teststatus nicht verfügbar");
+    renderTestState(testState);
+  } catch (error) {
+    $("#test-summary").textContent = error.message;
+    $("#run-tests").disabled = true;
+  }
+}
+
+function renderTestState(testState) {
+  const packages = testState.packages ?? [];
+  const passed = packages.filter(item => item.status === "pass").length;
+  const failed = packages.filter(item => item.status === "fail").length;
+  const running = testState.status === "running";
+  const statusLabels = {
+    idle: "Bereit", running: "Läuft", passed: "Erfolgreich", failed: "Fehlgeschlagen",
+    canceled: "Abgebrochen", timeout: "Zeitüberschreitung",
+  };
+  $("#test-status").className = `test-status ${testState.status}`;
+  $("#test-status").textContent = statusLabels[testState.status] ?? testState.status;
+  $("#test-command").textContent = testState.command || "Kein unterstütztes Test-Framework erkannt";
+  $("#test-summary").textContent = !testState.available
+    ? "Für dieses Repository wurde noch kein unterstütztes Test-Framework erkannt."
+    : running
+      ? "Die Tests werden ausgeführt …"
+      : testState.finishedAt
+        ? `Letzter Lauf ${relativeTime(new Date(testState.finishedAt))}.`
+        : `${testState.framework} wurde erkannt und kann gestartet werden.`;
+  $("#test-packages").textContent = testState.finishedAt ? number.format(packages.length) : "—";
+  $("#test-passed").textContent = testState.finishedAt ? number.format(passed) : "—";
+  $("#test-failed").textContent = testState.finishedAt ? number.format(failed) : "—";
+  $("#test-duration").textContent = testState.finishedAt ? formatDuration(testState.durationMs) : "—";
+  $("#run-tests").disabled = !testState.available || running;
+  $("#run-tests").textContent = testState.finishedAt ? "Erneut ausführen" : "Tests starten";
+  $("#cancel-tests").classList.toggle("view-hidden", !running);
+  $("#test-packages-list").innerHTML = packages.length
+    ? packages.map(item => `
+      <div class="test-package">
+        <span class="test-result-icon ${item.status}">${item.status === "pass" ? "✓" : item.status === "skip" ? "−" : "×"}</span>
+        <strong>${escapeHTML(item.name)}</strong>
+        <span>${formatDuration(item.durationMs)}</span>
+      </div>`).join("")
+    : `<div class="empty-state">${running ? "Testergebnisse werden gesammelt …" : "Noch keine Tests ausgeführt"}</div>`;
+  $("#test-output").textContent = testState.output || testState.error || "Noch keine Ausgabe vorhanden.";
+}
+
+async function testAction(action) {
+  const button = action === "run" ? $("#run-tests") : $("#cancel-tests");
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/tests/${action}`, { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Testaktion fehlgeschlagen");
+    renderTestState(payload);
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    fetchTestState();
+  }
+}
+
+function formatDuration(milliseconds) {
+  if (milliseconds < 1000) return `${milliseconds} ms`;
+  return `${(milliseconds / 1000).toFixed(1)} s`;
+}
+
 $$("nav [data-route]").forEach(link => {
   link.addEventListener("click", event => {
     event.preventDefault();
-    link.dataset.route === "changes" ? openReview() : navigateOverview();
+    link.dataset.route === "changes" ? openReview() : navigate(link.dataset.route);
   });
 });
 $("[data-open-review]").addEventListener("click", () => openReview());
@@ -364,22 +445,27 @@ $$("[data-mode]").forEach(button => {
   });
 });
 $("#git-action").addEventListener("click", runGitAction);
+$("#run-tests").addEventListener("click", () => testAction("run"));
+$("#cancel-tests").addEventListener("click", () => testAction("cancel"));
 window.addEventListener("popstate", () => {
-  state.view = location.pathname === "/changes" ? "changes" : "overview";
+  state.view = location.pathname === "/changes" ? "changes" : location.pathname === "/tests" ? "tests" : "overview";
   state.selectedPath = new URLSearchParams(location.search).get("file");
   applyRoute();
   if (state.view === "changes" && state.selectedPath) loadDiff();
+  if (state.view === "tests") fetchTestState();
 });
 
 const events = new EventSource("/api/events");
 events.addEventListener("snapshot", event => render(JSON.parse(event.data)));
-events.onerror = () => { $(".live").lastChild.textContent = " Verbinde …"; };
-events.onopen = () => { $(".live").lastChild.textContent = " Live"; };
+setInterval(() => {
+  if (state.view === "tests") fetchTestState();
+}, 1000);
 
 applyRoute();
 fetchSnapshot()
   .then(() => {
     if (state.view === "changes" && state.selectedPath) selectFile(state.selectedPath);
+    if (state.view === "tests") fetchTestState();
   })
   .catch(error => {
     $("#summary-copy").textContent = `Verbindung fehlgeschlagen: ${error.message}`;
