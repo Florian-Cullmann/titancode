@@ -35,6 +35,7 @@ layer that stays useful alongside any CLI-based agent.
 - multi-suite test discovery for nested and mixed-language repositories
 - Go, Python unittest, PHPUnit, and JavaScript/TypeScript test execution
 - independent suite results, runtimes, cancellation, and failure output
+- live freshness tracking when framework-relevant files change after a test run
 - repository areas grouped by file and code size
 - language distribution and source-file statistics
 - `.gitignore`-aware scanning

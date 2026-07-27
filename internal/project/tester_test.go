@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunnerDetectsGoProject(t *testing.T) {
@@ -157,6 +158,43 @@ func TestRunnerRefreshesSuitesWithoutLosingResults(t *testing.T) {
 	runner.Refresh()
 	if suites := runner.State().Suites; len(suites) != 1 {
 		t.Fatalf("suites after removal = %#v", suites)
+	}
+}
+
+func TestRunnerMarksCompletedSuiteStaleAfterRelevantChange(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "go.mod"), "module example.com/root\n")
+	source := filepath.Join(root, "service.go")
+	writeTestFile(t, source, "package root\n")
+	runner := NewTestRunner(root)
+	suiteID := runner.State().Suites[0].ID
+	started := time.Now()
+
+	runner.mu.Lock()
+	runtime := runner.suites[suiteID]
+	runtime.suite.Status = "passed"
+	runtime.suite.StartedAt = &started
+	runtime.baseline = relevantFileSignatures(root, runtime.framework)
+	runner.mu.Unlock()
+
+	writeTestFile(t, source, "package root\n\nfunc Run() {}\n")
+	runner.Refresh()
+	suite := runner.State().Suites[0]
+	if !suite.Stale || suite.Changed != 1 {
+		t.Fatalf("suite was not marked stale: %#v", suite)
+	}
+}
+
+func TestFrameworkFingerprintsIgnoreUnrelatedLanguages(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "main.go"), "package main\n")
+	writeTestFile(t, filepath.Join(root, "frontend", "app.ts"), "export const ready = true;\n")
+
+	before := relevantFileSignatures(root, goTestFramework{})
+	writeTestFile(t, filepath.Join(root, "frontend", "app.ts"), "export const ready = false;\n")
+	after := relevantFileSignatures(root, goTestFramework{})
+	if changed := changedFileCount(before, after); changed != 0 {
+		t.Fatalf("unrelated files changed Go fingerprint by %d", changed)
 	}
 }
 

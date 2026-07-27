@@ -375,6 +375,7 @@ function renderTestState(testState) {
   const results = suites.flatMap(suite => suite.results ?? []);
   const passed = results.filter(item => item.status === "pass").length;
   const failed = results.filter(item => item.status === "fail").length;
+  const stale = suites.filter(suite => suite.stale).length;
   const running = testState.status === "running";
   const statusLabels = {
     idle: "Bereit", running: "Läuft", passed: "Erfolgreich", failed: "Fehlgeschlagen",
@@ -389,7 +390,9 @@ function renderTestState(testState) {
     ? "Für dieses Repository wurde noch keine unterstützte Test-Suite erkannt."
     : running
       ? "Mindestens eine Test-Suite wird ausgeführt …"
-      : `${suites.length} ${suites.length === 1 ? "Suite ist" : "Suites sind"} bereit.`;
+      : stale
+        ? `${stale} ${stale === 1 ? "Testergebnis ist" : "Testergebnisse sind"} nach Codeänderungen veraltet.`
+        : `${suites.length} ${suites.length === 1 ? "Suite ist" : "Suites sind"} bereit.`;
   $("#test-packages").textContent = results.length ? number.format(results.length) : "—";
   $("#test-passed").textContent = results.length ? number.format(passed) : "—";
   $("#test-failed").textContent = results.length ? number.format(failed) : "—";
@@ -400,15 +403,15 @@ function renderTestState(testState) {
   $("#cancel-tests").classList.toggle("view-hidden", !running);
   $("#test-suites-list").innerHTML = suites.length
     ? suites.map(suite => `
-      <button class="test-suite ${suite.id === state.selectedTestSuite ? "active" : ""}" type="button" data-suite-id="${escapeHTML(suite.id)}">
-        <span class="test-result-icon ${suiteStatusIcon(suite.status)}">${suiteStatusSymbol(suite.status)}</span>
+      <button class="test-suite ${suite.id === state.selectedTestSuite ? "active" : ""} ${suite.stale ? "stale" : ""}" type="button" data-suite-id="${escapeHTML(suite.id)}">
+        <span class="test-result-icon ${suite.stale ? "skip" : suiteStatusIcon(suite.status)}">${suite.stale ? "!" : suiteStatusSymbol(suite.status)}</span>
         <span class="test-suite-main">
           <strong>${escapeHTML(suite.name)}</strong>
           <small>${escapeHTML(suite.path)} · ${escapeHTML(suite.framework)}</small>
           <code>${escapeHTML(suite.command)}</code>
         </span>
-        <span class="test-suite-state">${statusLabels[suite.status] ?? suite.status}</span>
-        <span class="suite-run" role="button" tabindex="0" data-run-suite="${escapeHTML(suite.id)}">${suite.status === "running" ? "Läuft …" : "Starten"}</span>
+        <span class="test-suite-state">${suite.stale ? `Veraltet · ${suite.changedFiles} ${suite.changedFiles === 1 ? "Datei" : "Dateien"}` : statusLabels[suite.status] ?? suite.status}</span>
+        <span class="suite-run" role="button" tabindex="0" data-run-suite="${escapeHTML(suite.id)}">${suite.status === "running" ? "Läuft …" : suite.stale ? "Erneut" : "Starten"}</span>
       </button>`).join("")
     : `<div class="empty-state">Keine unterstützten Test-Suites erkannt</div>`;
   $$("[data-suite-id]").forEach(element => {

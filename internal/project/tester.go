@@ -41,6 +41,8 @@ type TestSuite struct {
 	DurationMS int64        `json:"durationMs"`
 	Output     string       `json:"output,omitempty"`
 	Error      string       `json:"error,omitempty"`
+	Stale      bool         `json:"stale"`
+	Changed    int          `json:"changedFiles"`
 }
 
 type TestResult struct {
@@ -54,6 +56,7 @@ type testFramework interface {
 	name() string
 	command(root string) (string, []string)
 	parse([]byte) ([]TestResult, string)
+	relevant(string) bool
 }
 
 var testFrameworks = []testFramework{
@@ -67,6 +70,12 @@ type testSuiteRuntime struct {
 	suite     TestSuite
 	framework testFramework
 	cancel    context.CancelFunc
+	baseline  map[string]fileSignature
+}
+
+type fileSignature struct {
+	size    int64
+	modTime int64
 }
 
 type TestRunner struct {
@@ -100,6 +109,14 @@ func (r *TestRunner) Refresh() {
 			existing.suite.Path = candidate.suite.Path
 			existing.suite.Framework = candidate.suite.Framework
 			existing.suite.Command = candidate.suite.Command
+		}
+		if existing.suite.StartedAt != nil {
+			currentFiles := relevantFileSignatures(
+				filepath.Join(r.root, filepath.FromSlash(existing.suite.Path)),
+				existing.framework,
+			)
+			existing.suite.Changed = changedFileCount(existing.baseline, currentFiles)
+			existing.suite.Stale = existing.suite.Changed > 0
 		}
 	}
 	for id, runtime := range r.suites {
@@ -216,6 +233,12 @@ func (r *TestRunner) startLocked(runtime *testSuiteRuntime) {
 	runtime.suite.DurationMS = 0
 	runtime.suite.Output = ""
 	runtime.suite.Error = ""
+	runtime.suite.Stale = false
+	runtime.suite.Changed = 0
+	runtime.baseline = relevantFileSignatures(
+		filepath.Join(r.root, filepath.FromSlash(runtime.suite.Path)),
+		runtime.framework,
+	)
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	runtime.cancel = cancel
 	go r.run(ctx, runtime.suite.ID, started, executable, arguments)
@@ -349,6 +372,10 @@ func (goTestFramework) parse(output []byte) ([]TestResult, string) {
 	}
 	return sortedTestResults(results), readable.String()
 }
+func (goTestFramework) relevant(path string) bool {
+	name := filepath.Base(path)
+	return strings.HasSuffix(name, ".go") || name == "go.mod" || name == "go.sum"
+}
 
 type pythonUnittestFramework struct{}
 
@@ -397,6 +424,11 @@ func (pythonUnittestFramework) parse(output []byte) ([]TestResult, string) {
 	}
 	return sortedTestResults(results), string(output)
 }
+func (pythonUnittestFramework) relevant(path string) bool {
+	name := filepath.Base(path)
+	return strings.HasSuffix(name, ".py") || name == "pyproject.toml" ||
+		name == "requirements.txt" || name == "setup.py" || name == "setup.cfg"
+}
 
 type phpUnitFramework struct{}
 
@@ -437,6 +469,11 @@ func (phpUnitFramework) parse(output []byte) ([]TestResult, string) {
 	}
 	return results, string(output)
 }
+func (phpUnitFramework) relevant(path string) bool {
+	name := filepath.Base(path)
+	return strings.HasSuffix(name, ".php") || name == "composer.json" || name == "composer.lock" ||
+		name == "phpunit.xml" || name == "phpunit.xml.dist"
+}
 
 type javaScriptTestFramework struct{}
 
@@ -465,6 +502,19 @@ func (javaScriptTestFramework) command(root string) (string, []string) {
 }
 func (javaScriptTestFramework) parse(output []byte) ([]TestResult, string) {
 	return make([]TestResult, 0), string(output)
+}
+func (javaScriptTestFramework) relevant(path string) bool {
+	name := filepath.Base(path)
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte":
+		return true
+	}
+	switch name {
+	case "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb":
+		return true
+	default:
+		return false
+	}
 }
 
 func testOutputScanner(output []byte) *bufio.Scanner {
@@ -518,4 +568,47 @@ func trimTestOutput(output []byte) string {
 		return string(output)
 	}
 	return "[output truncated]\n" + string(output[len(output)-maxTestOutput:])
+}
+
+func relevantFileSignatures(root string, framework testFramework) map[string]fileSignature {
+	files := make(map[string]fileSignature)
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			if path != root && ignoredDirectories[entry.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !framework.relevant(path) {
+			return nil
+		}
+		info, statErr := entry.Info()
+		if statErr != nil {
+			return nil
+		}
+		relative, relativeErr := filepath.Rel(root, path)
+		if relativeErr == nil {
+			files[filepath.ToSlash(relative)] = fileSignature{size: info.Size(), modTime: info.ModTime().UnixNano()}
+		}
+		return nil
+	})
+	return files
+}
+
+func changedFileCount(baseline, current map[string]fileSignature) int {
+	changed := 0
+	for path, before := range baseline {
+		if after, ok := current[path]; !ok || after != before {
+			changed++
+		}
+	}
+	for path := range current {
+		if _, ok := baseline[path]; !ok {
+			changed++
+		}
+	}
+	return changed
 }

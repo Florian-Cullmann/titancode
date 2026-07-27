@@ -234,6 +234,8 @@ h1 { margin: 0; font-size: 24px; letter-spacing: -.55px; font-weight: 650; }
 .test-suite:last-child { border-bottom-color: transparent; }
 .test-suite:hover { background: #0f1f2a; }
 .test-suite.active { background: #102330; border-color: #1d455b; border-radius: 6px; }
+.test-suite.stale { border-left-color: #76571f; }
+.test-suite.stale .test-suite-state { color: #e5b75f; }
 .test-suite-main { min-width: 0; display: grid; gap: 3px; }
 .test-suite-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .test-suite-main small { color: var(--muted); font-size: 9px; }
