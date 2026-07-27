@@ -36,6 +36,7 @@ layer that stays useful alongside any CLI-based agent.
 - Go, Python unittest, PHPUnit, and JavaScript/TypeScript test execution
 - independent suite results, runtimes, cancellation, and failure output
 - live freshness tracking when framework-relevant files change after a test run
+- persistent per-suite history with failure details and runtime slowdown detection
 - repository areas grouped by file and code size
 - language distribution and source-file statistics
 - `.gitignore`-aware scanning
@@ -175,7 +176,7 @@ go build -o bin/titancode ./cmd/titancode
 
 - unified and semantic diff review
 - symbol index, definitions, references, and call graphs
-- test result history and support for additional test frameworks
+- support for additional test frameworks
 - coverage for changed lines and test-to-code relationships
 - complexity, duplication, size, and readability trends
 - explicit architecture rules and dependency violations

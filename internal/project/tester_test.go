@@ -1,6 +1,7 @@
 package project
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -195,6 +196,75 @@ func TestFrameworkFingerprintsIgnoreUnrelatedLanguages(t *testing.T) {
 	after := relevantFileSignatures(root, goTestFramework{})
 	if changed := changedFileCount(before, after); changed != 0 {
 		t.Fatalf("unrelated files changed Go fingerprint by %d", changed)
+	}
+}
+
+func TestRunnerPersistsAndReloadsTestHistory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(root, "go.mod"), "module example.com/history\n\ngo 1.26\n")
+	writeTestFile(t, filepath.Join(root, "history_test.go"), "package history\n\nimport \"testing\"\n\nfunc TestHistory(t *testing.T) {}\n")
+	runner := NewTestRunner(root)
+	if err := runner.Start(""); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for runner.State().Status == "running" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	state := runner.State()
+	if state.Status != "passed" || len(state.Suites[0].History) != 1 {
+		t.Fatalf("completed state = %#v", state)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git", "titancode", "test-history.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded := NewTestRunner(root).State()
+	if len(reloaded.Suites) != 1 || len(reloaded.Suites[0].History) != 1 {
+		t.Fatalf("reloaded state = %#v", reloaded)
+	}
+	if reloaded.Suites[0].History[0].Status != "passed" {
+		t.Fatalf("reloaded run = %#v", reloaded.Suites[0].History[0])
+	}
+}
+
+func TestRunnerLimitsLoadedHistory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git", "titancode"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(root, "go.mod"), "module example.com/history\n")
+	runs := make([]TestRun, maxTestRuns+5)
+	for index := range runs {
+		runs[index] = TestRun{Status: "passed", StartedAt: time.Unix(int64(index), 0)}
+	}
+	payload, err := json.Marshal(map[string][]TestRun{"go:.": runs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(root, ".git", "titancode", "test-history.json"), string(payload))
+
+	state := NewTestRunner(root).State()
+	if got := len(state.Suites[0].History); got != maxTestRuns {
+		t.Fatalf("history length = %d, want %d", got, maxTestRuns)
+	}
+}
+
+func TestTestRunIsSlowerThanRecentSuccessfulRuns(t *testing.T) {
+	history := []TestRun{
+		{Status: "passed", DurationMS: 1000},
+		{Status: "failed", DurationMS: 9000},
+		{Status: "passed", DurationMS: 1200},
+	}
+	if !testRunIsSlower(1500, history) {
+		t.Fatal("expected significant slowdown")
+	}
+	if testRunIsSlower(1250, history) {
+		t.Fatal("minor runtime variation was marked as slow")
 	}
 }
 

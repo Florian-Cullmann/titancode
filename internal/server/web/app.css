@@ -253,6 +253,15 @@ h1 { margin: 0; font-size: 24px; letter-spacing: -.55px; font-weight: 650; }
 .test-result-icon.fail { color: var(--red); background: #321b1e; }
 .test-result-icon.skip { color: var(--amber); background: #30230f; }
 .test-output { min-height: 180px; max-height: 430px; margin: 0; padding: 16px; overflow: auto; color: #9fb0bd; background: #08121a; white-space: pre-wrap; word-break: break-word; font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.test-history-panel { grid-column: 1 / -1; }
+.test-history-list { padding: 6px 12px 12px; }
+.test-history-row { width: 100%; min-height: 52px; padding: 8px; display: grid; grid-template-columns: 24px minmax(0, 1fr) 100px 70px; gap: 10px; align-items: center; color: inherit; text-align: left; background: transparent; border: 1px solid transparent; border-bottom-color: var(--border-soft); cursor: pointer; }
+.test-history-row:hover { background: #0f1f2a; }
+.test-history-row.active { background: #102330; border-color: #1d455b; border-radius: 6px; }
+.test-history-row strong, .test-history-row small { display: block; }
+.test-history-row strong { font-size: 10px; }
+.test-history-row small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.test-history-row > span:nth-last-child(-n+2) { color: var(--muted); font-size: 9px; text-align: right; }
 
 @media (max-width: 1100px) {
   .shell { grid-template-columns: 76px 1fr; }
@@ -274,6 +283,7 @@ h1 { margin: 0; font-size: 24px; letter-spacing: -.55px; font-weight: 650; }
   .review-workspace { grid-template-columns: 1fr; }
   .test-workspace { grid-template-columns: 1fr; }
   .test-overview { grid-column: auto; }
+  .test-history-panel { grid-column: auto; }
   .test-suite { grid-template-columns: 24px minmax(0, 1fr) 62px; }
   .test-suite-state { display: none; }
   .review-files-list { max-height: 240px; }

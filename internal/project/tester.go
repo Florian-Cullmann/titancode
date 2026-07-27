@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 const (
 	testTimeout   = 2 * time.Minute
 	maxTestOutput = 256 * 1024
+	maxTestRuns   = 20
 )
 
 type TestState struct {
@@ -43,12 +45,25 @@ type TestSuite struct {
 	Error      string       `json:"error,omitempty"`
 	Stale      bool         `json:"stale"`
 	Changed    int          `json:"changedFiles"`
+	History    []TestRun    `json:"history"`
 }
 
 type TestResult struct {
 	Name       string `json:"name"`
 	Status     string `json:"status"`
 	DurationMS int64  `json:"durationMs"`
+}
+
+type TestRun struct {
+	Status      string       `json:"status"`
+	StartedAt   time.Time    `json:"startedAt"`
+	FinishedAt  time.Time    `json:"finishedAt"`
+	DurationMS  int64        `json:"durationMs"`
+	Results     []TestResult `json:"results"`
+	Output      string       `json:"output,omitempty"`
+	Error       string       `json:"error,omitempty"`
+	Fingerprint string       `json:"fingerprint"`
+	Slow        bool         `json:"slow,omitempty"`
 }
 
 type testFramework interface {
@@ -79,13 +94,19 @@ type fileSignature struct {
 }
 
 type TestRunner struct {
-	root   string
-	mu     sync.RWMutex
-	suites map[string]*testSuiteRuntime
+	root        string
+	historyPath string
+	mu          sync.RWMutex
+	suites      map[string]*testSuiteRuntime
+	history     map[string][]TestRun
 }
 
 func NewTestRunner(root string) *TestRunner {
-	runner := &TestRunner{root: root, suites: make(map[string]*testSuiteRuntime)}
+	runner := &TestRunner{
+		root: root, historyPath: testHistoryPath(root),
+		suites: make(map[string]*testSuiteRuntime), history: make(map[string][]TestRun),
+	}
+	runner.loadHistory()
 	runner.Refresh()
 	return runner
 }
@@ -100,6 +121,7 @@ func (r *TestRunner) Refresh() {
 		current[candidate.suite.ID] = true
 		existing := r.suites[candidate.suite.ID]
 		if existing == nil {
+			candidate.suite.History = append([]TestRun(nil), r.history[candidate.suite.ID]...)
 			r.suites[candidate.suite.ID] = candidate
 			continue
 		}
@@ -134,6 +156,7 @@ func (r *TestRunner) State() TestState {
 	for _, runtime := range r.suites {
 		suite := runtime.suite
 		suite.Results = append([]TestResult(nil), suite.Results...)
+		suite.History = cloneTestRuns(suite.History)
 		state.Suites = append(state.Suites, suite)
 		switch suite.Status {
 		case "running":
@@ -282,7 +305,22 @@ func (r *TestRunner) run(ctx context.Context, id string, started time.Time, exec
 	runtime.suite.DurationMS = finished.Sub(started).Milliseconds()
 	runtime.suite.Output = trimTestOutput([]byte(readableOutput))
 	runtime.suite.Error = errorMessage
+	run := TestRun{
+		Status: status, StartedAt: started, FinishedAt: finished,
+		DurationMS: runtime.suite.DurationMS, Results: append([]TestResult(nil), results...),
+		Error: errorMessage, Fingerprint: signatureFingerprint(runtime.baseline),
+	}
+	run.Slow = status == "passed" && testRunIsSlower(run.DurationMS, runtime.suite.History)
+	if status != "passed" {
+		run.Output = runtime.suite.Output
+	}
+	runtime.suite.History = append([]TestRun{run}, runtime.suite.History...)
+	if len(runtime.suite.History) > maxTestRuns {
+		runtime.suite.History = runtime.suite.History[:maxTestRuns]
+	}
+	r.history[id] = cloneTestRuns(runtime.suite.History)
 	runtime.cancel = nil
+	r.saveHistoryLocked()
 	r.mu.Unlock()
 }
 
@@ -328,7 +366,7 @@ func discoverTestSuites(root string) []*testSuiteRuntime {
 				suite: TestSuite{
 					ID: id, Name: name, Path: relative, Framework: framework.name(),
 					Command: formatTestCommand(executable, arguments), Status: "idle",
-					Results: make([]TestResult, 0),
+					Results: make([]TestResult, 0), History: make([]TestRun, 0),
 				},
 			})
 		}
@@ -611,4 +649,118 @@ func changedFileCount(baseline, current map[string]fileSignature) int {
 		}
 	}
 	return changed
+}
+
+func signatureFingerprint(files map[string]fileSignature) string {
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	hash := sha256.New()
+	for _, path := range paths {
+		signature := files[path]
+		_, _ = fmt.Fprintf(hash, "%s\x00%d\x00%d\x00", path, signature.size, signature.modTime)
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil))
+}
+
+func testHistoryPath(root string) string {
+	gitDirectory := filepath.Join(root, ".git")
+	if info, err := os.Stat(gitDirectory); err == nil && info.IsDir() {
+		return filepath.Join(gitDirectory, "titancode", "test-history.json")
+	}
+	command := exec.Command("git", "-C", root, "rev-parse", "--git-path", "titancode/test-history.json")
+	output, err := command.Output()
+	if err != nil {
+		return ""
+	}
+	path := strings.TrimSpace(string(output))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	return filepath.Clean(path)
+}
+
+func (r *TestRunner) loadHistory() {
+	if r.historyPath == "" {
+		return
+	}
+	content, err := os.ReadFile(r.historyPath)
+	if err != nil {
+		return
+	}
+	var history map[string][]TestRun
+	if json.Unmarshal(content, &history) != nil {
+		return
+	}
+	for id, runs := range history {
+		if len(runs) > maxTestRuns {
+			runs = runs[:maxTestRuns]
+		}
+		r.history[id] = cloneTestRuns(runs)
+	}
+}
+
+func (r *TestRunner) saveHistoryLocked() {
+	if r.historyPath == "" {
+		return
+	}
+	directory := filepath.Dir(r.historyPath)
+	if os.MkdirAll(directory, 0o700) != nil {
+		return
+	}
+	content, err := json.MarshalIndent(r.history, "", "  ")
+	if err != nil {
+		return
+	}
+	file, err := os.CreateTemp(directory, "test-history-*.tmp")
+	if err != nil {
+		return
+	}
+	temporaryPath := file.Name()
+	defer os.Remove(temporaryPath)
+	if file.Chmod(0o600) != nil {
+		_ = file.Close()
+		return
+	}
+	if _, err = file.Write(content); err != nil {
+		_ = file.Close()
+		return
+	}
+	if file.Close() != nil {
+		return
+	}
+	_ = os.Rename(temporaryPath, r.historyPath)
+}
+
+func cloneTestRuns(runs []TestRun) []TestRun {
+	cloned := append([]TestRun(nil), runs...)
+	for index := range cloned {
+		cloned[index].Results = append([]TestResult(nil), cloned[index].Results...)
+	}
+	if cloned == nil {
+		return make([]TestRun, 0)
+	}
+	return cloned
+}
+
+func testRunIsSlower(durationMS int64, history []TestRun) bool {
+	var total int64
+	count := 0
+	for _, run := range history {
+		if run.Status != "passed" || run.DurationMS <= 0 {
+			continue
+		}
+		total += run.DurationMS
+		count++
+		if count == 5 {
+			break
+		}
+	}
+	if count == 0 {
+		return false
+	}
+	average := total / int64(count)
+	return durationMS-average >= 100 && durationMS*100 >= average*125
 }

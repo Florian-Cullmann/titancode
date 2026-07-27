@@ -10,6 +10,7 @@ const state = {
   mode: "working",
   filter: "all",
   selectedTestSuite: null,
+  selectedTestRun: null,
 };
 
 function escapeHTML(value) {
@@ -372,6 +373,9 @@ function renderTestState(testState) {
     state.selectedTestSuite = suites[0]?.id ?? null;
   }
   const selected = suites.find(suite => suite.id === state.selectedTestSuite);
+  if (state.selectedTestRun && !selected?.history?.some(run => run.startedAt === state.selectedTestRun)) {
+    state.selectedTestRun = null;
+  }
   const results = suites.flatMap(suite => suite.results ?? []);
   const passed = results.filter(item => item.status === "pass").length;
   const failed = results.filter(item => item.status === "fail").length;
@@ -417,6 +421,7 @@ function renderTestState(testState) {
   $$("[data-suite-id]").forEach(element => {
     element.addEventListener("click", () => {
       state.selectedTestSuite = element.dataset.suiteId;
+      state.selectedTestRun = null;
       renderTestState(testState);
     });
   });
@@ -435,7 +440,26 @@ function renderTestState(testState) {
         <span>${formatDuration(item.durationMs)}</span>
       </div>`).join("")
     : `<div class="empty-state">${selected?.status === "running" ? "Testergebnisse werden gesammelt …" : "Noch keine Ergebnisse für diese Suite"}</div>`;
-  $("#test-output").textContent = selected?.output || selected?.error || "Noch keine Ausgabe für diese Suite vorhanden.";
+  const history = selected?.history ?? [];
+  $("#test-history-list").innerHTML = history.length
+    ? history.map(run => `
+      <button class="test-history-row ${run.startedAt === state.selectedTestRun ? "active" : ""}" type="button" data-test-run="${escapeHTML(run.startedAt)}">
+        <span class="test-result-icon ${suiteStatusIcon(run.status)}">${suiteStatusSymbol(run.status)}</span>
+        <span><strong>${escapeHTML(statusLabels[run.status] ?? run.status)}${run.slow ? " · Langsamer" : ""}</strong><small>${new Date(run.finishedAt).toLocaleString("de-DE")}</small></span>
+        <span>${number.format(run.results?.length ?? 0)} Ergebnisse</span>
+        <span>${formatDuration(run.durationMs)}</span>
+      </button>`).join("")
+    : `<div class="empty-state">Noch keine gespeicherten Testläufe</div>`;
+  $$("[data-test-run]").forEach(element => {
+    element.addEventListener("click", () => {
+      state.selectedTestRun = element.dataset.testRun;
+      renderTestState(testState);
+    });
+  });
+  const selectedRun = history.find(run => run.startedAt === state.selectedTestRun);
+  $("#test-output").textContent = selectedRun
+    ? selectedRun.output || selectedRun.error || "Für diesen erfolgreichen Lauf wurde keine Ausgabe gespeichert."
+    : selected?.output || selected?.error || "Noch keine Ausgabe für diese Suite vorhanden.";
 }
 
 function suiteStatusIcon(status) {
