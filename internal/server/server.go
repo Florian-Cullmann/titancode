@@ -47,6 +47,7 @@ func New(scanner *project.Scanner) http.Handler {
 	mux.HandleFunc("GET /api/tests", server.testState)
 	mux.HandleFunc("POST /api/tests/run", server.runTests)
 	mux.HandleFunc("POST /api/tests/cancel", server.cancelTests)
+	mux.HandleFunc("POST /api/tests/settings", server.testSettings)
 	content, _ := fs.Sub(webFiles, "web")
 	mux.HandleFunc("GET /changes", serveIndex(content))
 	mux.HandleFunc("GET /tests", serveIndex(content))
@@ -64,6 +65,28 @@ func (s *Server) runTests(writer http.ResponseWriter, request *http.Request) {
 
 func (s *Server) cancelTests(writer http.ResponseWriter, request *http.Request) {
 	s.testAction(writer, request, s.tester.Cancel)
+}
+
+func (s *Server) testSettings(writer http.ResponseWriter, request *http.Request) {
+	if !sameOrigin(request) {
+		writeError(writer, http.StatusForbidden, errors.New("cross-origin request rejected"))
+		return
+	}
+	var payload struct {
+		SuiteID     string `json:"suiteId"`
+		Mode        string `json:"mode"`
+		IdleSeconds int    `json:"idleSeconds"`
+	}
+	request.Body = http.MaxBytesReader(writer, request.Body, 4096)
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		writeError(writer, http.StatusBadRequest, errors.New("invalid request body"))
+		return
+	}
+	if err := s.tester.Configure(payload.SuiteID, payload.Mode, payload.IdleSeconds); err != nil {
+		writeError(writer, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, s.tester.State())
 }
 
 func (s *Server) testAction(writer http.ResponseWriter, request *http.Request, action func(string) error) {

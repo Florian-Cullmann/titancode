@@ -31,21 +31,24 @@ type TestState struct {
 }
 
 type TestSuite struct {
-	ID         string       `json:"id"`
-	Name       string       `json:"name"`
-	Path       string       `json:"path"`
-	Framework  string       `json:"framework"`
-	Command    string       `json:"command"`
-	Status     string       `json:"status"`
-	Results    []TestResult `json:"results"`
-	StartedAt  *time.Time   `json:"startedAt,omitempty"`
-	FinishedAt *time.Time   `json:"finishedAt,omitempty"`
-	DurationMS int64        `json:"durationMs"`
-	Output     string       `json:"output,omitempty"`
-	Error      string       `json:"error,omitempty"`
-	Stale      bool         `json:"stale"`
-	Changed    int          `json:"changedFiles"`
-	History    []TestRun    `json:"history"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Path        string       `json:"path"`
+	Framework   string       `json:"framework"`
+	Command     string       `json:"command"`
+	Status      string       `json:"status"`
+	Results     []TestResult `json:"results"`
+	StartedAt   *time.Time   `json:"startedAt,omitempty"`
+	FinishedAt  *time.Time   `json:"finishedAt,omitempty"`
+	DurationMS  int64        `json:"durationMs"`
+	Output      string       `json:"output,omitempty"`
+	Error       string       `json:"error,omitempty"`
+	Stale       bool         `json:"stale"`
+	Changed     int          `json:"changedFiles"`
+	History     []TestRun    `json:"history"`
+	AutoMode    string       `json:"autoMode"`
+	IdleSeconds int          `json:"idleSeconds"`
+	ScheduledAt *time.Time   `json:"scheduledAt,omitempty"`
 }
 
 type TestResult struct {
@@ -82,10 +85,14 @@ var testFrameworks = []testFramework{
 }
 
 type testSuiteRuntime struct {
-	suite     TestSuite
-	framework testFramework
-	cancel    context.CancelFunc
-	baseline  map[string]fileSignature
+	suite       TestSuite
+	framework   testFramework
+	cancel      context.CancelFunc
+	baseline    map[string]fileSignature
+	observed    map[string]fileSignature
+	staged      map[string]string
+	stagedKnown bool
+	autoPending bool
 }
 
 type fileSignature struct {
@@ -94,34 +101,55 @@ type fileSignature struct {
 }
 
 type TestRunner struct {
-	root        string
-	historyPath string
-	mu          sync.RWMutex
-	suites      map[string]*testSuiteRuntime
-	history     map[string][]TestRun
+	root         string
+	historyPath  string
+	mu           sync.RWMutex
+	suites       map[string]*testSuiteRuntime
+	history      map[string][]TestRun
+	settingsPath string
+	settings     map[string]AutoTestSettings
+}
+
+type AutoTestSettings struct {
+	Mode        string `json:"mode"`
+	IdleSeconds int    `json:"idleSeconds"`
 }
 
 func NewTestRunner(root string) *TestRunner {
 	runner := &TestRunner{
-		root: root, historyPath: testHistoryPath(root),
+		root: root, historyPath: testHistoryPath(root), settingsPath: testSettingsPath(root),
 		suites: make(map[string]*testSuiteRuntime), history: make(map[string][]TestRun),
+		settings: make(map[string]AutoTestSettings),
 	}
 	runner.loadHistory()
+	runner.loadSettings()
 	runner.Refresh()
 	return runner
 }
 
 func (r *TestRunner) Refresh() {
 	detected := discoverTestSuites(r.root)
+	now := time.Now()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	current := make(map[string]bool, len(detected))
 	for _, candidate := range detected {
 		current[candidate.suite.ID] = true
+		suiteRoot := filepath.Join(r.root, filepath.FromSlash(candidate.suite.Path))
+		currentFiles := relevantFileSignatures(suiteRoot, candidate.framework)
 		existing := r.suites[candidate.suite.ID]
 		if existing == nil {
 			candidate.suite.History = append([]TestRun(nil), r.history[candidate.suite.ID]...)
+			settings := normalizedAutoTestSettings(r.settings[candidate.suite.ID])
+			candidate.suite.AutoMode = settings.Mode
+			candidate.suite.IdleSeconds = settings.IdleSeconds
+			candidate.observed = currentFiles
+			candidate.staged = make(map[string]string)
+			if settings.Mode == "staged" {
+				candidate.staged = stagedIndexState(r.root, candidate.suite.Path, candidate.framework)
+			}
+			candidate.stagedKnown = true
 			r.suites[candidate.suite.ID] = candidate
 			continue
 		}
@@ -132,13 +160,32 @@ func (r *TestRunner) Refresh() {
 			existing.suite.Framework = candidate.suite.Framework
 			existing.suite.Command = candidate.suite.Command
 		}
+		if changedFileCount(existing.observed, currentFiles) > 0 && existing.suite.AutoMode == "idle" {
+			due := now.Add(time.Duration(existing.suite.IdleSeconds) * time.Second)
+			existing.suite.ScheduledAt = &due
+			existing.autoPending = true
+		}
+		existing.observed = currentFiles
+		currentStaged := existing.staged
+		if existing.suite.AutoMode == "staged" {
+			currentStaged = stagedIndexState(r.root, existing.suite.Path, existing.framework)
+		}
+		if existing.stagedKnown && stagedIndexAddedOrChanged(existing.staged, currentStaged) &&
+			existing.suite.AutoMode == "staged" {
+			existing.autoPending = true
+			existing.suite.ScheduledAt = &now
+		}
+		existing.staged = currentStaged
+		existing.stagedKnown = true
 		if existing.suite.StartedAt != nil {
-			currentFiles := relevantFileSignatures(
-				filepath.Join(r.root, filepath.FromSlash(existing.suite.Path)),
-				existing.framework,
-			)
 			existing.suite.Changed = changedFileCount(existing.baseline, currentFiles)
 			existing.suite.Stale = existing.suite.Changed > 0
+		}
+		if existing.autoPending && existing.suite.Status != "running" &&
+			(existing.suite.ScheduledAt == nil || !now.Before(*existing.suite.ScheduledAt)) {
+			existing.autoPending = false
+			existing.suite.ScheduledAt = nil
+			r.startLocked(existing)
 		}
 	}
 	for id, runtime := range r.suites {
@@ -228,6 +275,31 @@ func (r *TestRunner) Cancel(id string) error {
 	return nil
 }
 
+func (r *TestRunner) Configure(id, mode string, idleSeconds int) error {
+	if mode != "manual" && mode != "idle" && mode != "staged" {
+		return errors.New("invalid auto-test mode")
+	}
+	if idleSeconds < 5 || idleSeconds > 3600 {
+		return errors.New("idle delay must be between 5 and 3600 seconds")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	runtime := r.suites[id]
+	if runtime == nil {
+		return errors.New("test suite not found")
+	}
+	settings := AutoTestSettings{Mode: mode, IdleSeconds: idleSeconds}
+	r.settings[id] = settings
+	runtime.suite.AutoMode = mode
+	runtime.suite.IdleSeconds = idleSeconds
+	runtime.suite.ScheduledAt = nil
+	runtime.autoPending = false
+	runtime.staged = stagedIndexState(r.root, runtime.suite.Path, runtime.framework)
+	runtime.stagedKnown = true
+	r.saveSettingsLocked()
+	return nil
+}
+
 func (r *TestRunner) targets(id string) ([]*testSuiteRuntime, error) {
 	if id != "" {
 		runtime := r.suites[id]
@@ -256,6 +328,8 @@ func (r *TestRunner) startLocked(runtime *testSuiteRuntime) {
 	runtime.suite.DurationMS = 0
 	runtime.suite.Output = ""
 	runtime.suite.Error = ""
+	runtime.suite.ScheduledAt = nil
+	runtime.autoPending = false
 	runtime.suite.Stale = false
 	runtime.suite.Changed = 0
 	runtime.baseline = relevantFileSignatures(
@@ -682,6 +756,14 @@ func testHistoryPath(root string) string {
 	return filepath.Clean(path)
 }
 
+func testSettingsPath(root string) string {
+	historyPath := testHistoryPath(root)
+	if historyPath == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(historyPath), "test-settings.json")
+}
+
 func (r *TestRunner) loadHistory() {
 	if r.historyPath == "" {
 		return
@@ -734,6 +816,65 @@ func (r *TestRunner) saveHistoryLocked() {
 	_ = os.Rename(temporaryPath, r.historyPath)
 }
 
+func (r *TestRunner) loadSettings() {
+	if r.settingsPath == "" {
+		return
+	}
+	content, err := os.ReadFile(r.settingsPath)
+	if err != nil {
+		return
+	}
+	var settings map[string]AutoTestSettings
+	if json.Unmarshal(content, &settings) != nil {
+		return
+	}
+	for id, item := range settings {
+		r.settings[id] = normalizedAutoTestSettings(item)
+	}
+}
+
+func (r *TestRunner) saveSettingsLocked() {
+	if r.settingsPath == "" {
+		return
+	}
+	directory := filepath.Dir(r.settingsPath)
+	if os.MkdirAll(directory, 0o700) != nil {
+		return
+	}
+	content, err := json.MarshalIndent(r.settings, "", "  ")
+	if err != nil {
+		return
+	}
+	file, err := os.CreateTemp(directory, "test-settings-*.tmp")
+	if err != nil {
+		return
+	}
+	temporaryPath := file.Name()
+	defer os.Remove(temporaryPath)
+	if file.Chmod(0o600) != nil {
+		_ = file.Close()
+		return
+	}
+	if _, err = file.Write(content); err != nil {
+		_ = file.Close()
+		return
+	}
+	if file.Close() != nil {
+		return
+	}
+	_ = os.Rename(temporaryPath, r.settingsPath)
+}
+
+func normalizedAutoTestSettings(settings AutoTestSettings) AutoTestSettings {
+	if settings.Mode != "idle" && settings.Mode != "staged" {
+		settings.Mode = "manual"
+	}
+	if settings.IdleSeconds < 5 || settings.IdleSeconds > 3600 {
+		settings.IdleSeconds = 30
+	}
+	return settings
+}
+
 func cloneTestRuns(runs []TestRun) []TestRun {
 	cloned := append([]TestRun(nil), runs...)
 	for index := range cloned {
@@ -763,4 +904,41 @@ func testRunIsSlower(durationMS int64, history []TestRun) bool {
 	}
 	average := total / int64(count)
 	return durationMS-average >= 100 && durationMS*100 >= average*125
+}
+
+func stagedIndexState(root, suitePath string, framework testFramework) map[string]string {
+	arguments := []string{"-C", root, "diff", "--cached", "--name-only", "-z", "--"}
+	if suitePath != "." {
+		arguments = append(arguments, suitePath)
+	}
+	output, err := exec.Command("git", arguments...).Output()
+	if err != nil {
+		return make(map[string]string)
+	}
+	state := make(map[string]string)
+	for _, record := range bytes.Split(output, []byte{0}) {
+		if len(record) == 0 {
+			continue
+		}
+		path := filepath.ToSlash(string(record))
+		if !framework.relevant(path) {
+			continue
+		}
+		blob, blobErr := exec.Command("git", "-C", root, "rev-parse", "--verify", ":"+path).Output()
+		if blobErr != nil {
+			state[path] = "deleted"
+		} else {
+			state[path] = strings.TrimSpace(string(blob))
+		}
+	}
+	return state
+}
+
+func stagedIndexAddedOrChanged(previous, current map[string]string) bool {
+	for path, blob := range current {
+		if oldBlob, ok := previous[path]; !ok || oldBlob != blob {
+			return true
+		}
+	}
+	return false
 }

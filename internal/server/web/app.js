@@ -11,6 +11,7 @@ const state = {
   filter: "all",
   selectedTestSuite: null,
   selectedTestRun: null,
+  autoSettingsDirty: false,
 };
 
 function escapeHTML(value) {
@@ -376,6 +377,14 @@ function renderTestState(testState) {
   if (state.selectedTestRun && !selected?.history?.some(run => run.startedAt === state.selectedTestRun)) {
     state.selectedTestRun = null;
   }
+  $("#auto-test-settings").classList.toggle("view-hidden", !selected);
+  if (selected && !state.autoSettingsDirty) {
+    $("#auto-test-mode").value = selected.autoMode || "manual";
+    $("#auto-test-delay").value = selected.idleSeconds || 30;
+  }
+  const autoMode = state.autoSettingsDirty ? $("#auto-test-mode").value : selected?.autoMode;
+  $("#idle-delay-setting").classList.toggle("view-hidden", autoMode !== "idle");
+  $("#auto-test-status").textContent = autoTestStatus(selected);
   const results = suites.flatMap(suite => suite.results ?? []);
   const passed = results.filter(item => item.status === "pass").length;
   const failed = results.filter(item => item.status === "fail").length;
@@ -422,6 +431,7 @@ function renderTestState(testState) {
     element.addEventListener("click", () => {
       state.selectedTestSuite = element.dataset.suiteId;
       state.selectedTestRun = null;
+      state.autoSettingsDirty = false;
       renderTestState(testState);
     });
   });
@@ -462,6 +472,16 @@ function renderTestState(testState) {
     : selected?.output || selected?.error || "Noch keine Ausgabe für diese Suite vorhanden.";
 }
 
+function autoTestStatus(suite) {
+  if (!suite || suite.autoMode === "manual") return "Tests werden nur manuell gestartet.";
+  if (suite.scheduledAt) {
+    const seconds = Math.max(0, Math.ceil((new Date(suite.scheduledAt).getTime() - Date.now()) / 1000));
+    return `Nächster Lauf in etwa ${seconds} Sekunden.`;
+  }
+  if (suite.autoMode === "idle") return `Start nach ${suite.idleSeconds} Sekunden ohne relevante Änderung.`;
+  return "Start, sobald relevante Änderungen neu gestagt werden.";
+}
+
 function suiteStatusIcon(status) {
   if (status === "passed") return "pass";
   if (status === "failed" || status === "timeout") return "fail";
@@ -496,6 +516,30 @@ async function testAction(action, suiteId = "") {
   }
 }
 
+async function saveAutoTestSettings() {
+  if (!state.selectedTestSuite) return;
+  const mode = $("#auto-test-mode").value;
+  const idleSeconds = Number($("#auto-test-delay").value);
+  const button = $("#save-auto-test");
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/tests/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ suiteId: state.selectedTestSuite, mode, idleSeconds }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Einstellung konnte nicht gespeichert werden");
+    state.autoSettingsDirty = false;
+    renderTestState(payload);
+    showToast("Auto-Test-Einstellung gespeichert.");
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function formatDuration(milliseconds) {
   if (milliseconds < 1000) return `${milliseconds} ms`;
   return `${(milliseconds / 1000).toFixed(1)} s`;
@@ -526,6 +570,12 @@ $$("[data-mode]").forEach(button => {
 $("#git-action").addEventListener("click", runGitAction);
 $("#run-tests").addEventListener("click", () => testAction("run"));
 $("#cancel-tests").addEventListener("click", () => testAction("cancel"));
+$("#auto-test-mode").addEventListener("change", () => {
+  state.autoSettingsDirty = true;
+  $("#idle-delay-setting").classList.toggle("view-hidden", $("#auto-test-mode").value !== "idle");
+});
+$("#auto-test-delay").addEventListener("input", () => { state.autoSettingsDirty = true; });
+$("#save-auto-test").addEventListener("click", saveAutoTestSettings);
 window.addEventListener("popstate", () => {
   state.view = location.pathname === "/changes" ? "changes" : location.pathname === "/tests" ? "tests" : "overview";
   state.selectedPath = new URLSearchParams(location.search).get("file");

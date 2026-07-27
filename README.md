@@ -37,6 +37,7 @@ layer that stays useful alongside any CLI-based agent.
 - independent suite results, runtimes, cancellation, and failure output
 - live freshness tracking when framework-relevant files change after a test run
 - persistent per-suite history with failure details and runtime slowdown detection
+- per-suite execution modes: manual, debounced after inactivity, or on new staged content
 - repository areas grouped by file and code size
 - language distribution and source-file statistics
 - `.gitignore`-aware scanning

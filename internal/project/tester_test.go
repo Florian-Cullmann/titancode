@@ -268,6 +268,109 @@ func TestTestRunIsSlowerThanRecentSuccessfulRuns(t *testing.T) {
 	}
 }
 
+func TestAutoTestSettingsDefaultToManualAndPersist(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(root, "go.mod"), "module example.com/settings\n")
+	runner := NewTestRunner(root)
+	suite := runner.State().Suites[0]
+	if suite.AutoMode != "manual" || suite.IdleSeconds != 30 {
+		t.Fatalf("default settings = %#v", suite)
+	}
+	if err := runner.Configure(suite.ID, "idle", 45); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded := NewTestRunner(root).State().Suites[0]
+	if reloaded.AutoMode != "idle" || reloaded.IdleSeconds != 45 {
+		t.Fatalf("reloaded settings = %#v", reloaded)
+	}
+}
+
+func TestIdleAutoTestIsDebouncedUntilDue(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "go.mod"), "module example.com/idle\n\ngo 1.26\n")
+	source := filepath.Join(root, "idle.go")
+	writeTestFile(t, source, "package idle\n")
+	runner := NewTestRunner(root)
+	suiteID := runner.State().Suites[0].ID
+	if err := runner.Configure(suiteID, "idle", 5); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestFile(t, source, "package idle\n\nfunc Ready() bool { return true }\n")
+	runner.Refresh()
+	suite := runner.State().Suites[0]
+	if suite.ScheduledAt == nil || suite.Status == "running" {
+		t.Fatalf("suite was not scheduled: %#v", suite)
+	}
+	firstDue := *suite.ScheduledAt
+
+	writeTestFile(t, source, "package idle\n\nfunc Ready() bool { return false }\n")
+	runner.Refresh()
+	suite = runner.State().Suites[0]
+	if suite.ScheduledAt == nil || !suite.ScheduledAt.After(firstDue) {
+		t.Fatalf("debounce was not extended: %#v", suite)
+	}
+
+	runner.mu.Lock()
+	past := time.Now().Add(-time.Second)
+	runner.suites[suiteID].suite.ScheduledAt = &past
+	runner.mu.Unlock()
+	runner.Refresh()
+	waitForTestRunner(t, runner)
+	if len(runner.State().Suites[0].History) != 1 {
+		t.Fatalf("automatic test did not run: %#v", runner.State())
+	}
+}
+
+func TestStagedAutoTestRunsOnlyForNewIndexContent(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init", "-b", "main")
+	writeTestFile(t, filepath.Join(root, "go.mod"), "module example.com/staged\n\ngo 1.26\n")
+	source := filepath.Join(root, "staged.go")
+	writeTestFile(t, source, "package staged\n")
+	runGit(t, root, "add", ".")
+	runGit(t, root, "-c", "user.name=Test User", "-c", "user.email=test@example.com", "commit", "-m", "initial")
+	runner := NewTestRunner(root)
+	suiteID := runner.State().Suites[0].ID
+	if err := runner.Configure(suiteID, "staged", 30); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestFile(t, source, "package staged\n\nfunc Ready() bool { return true }\n")
+	runner.Refresh()
+	if runner.State().Suites[0].Status == "running" {
+		t.Fatal("unstaged change started tests")
+	}
+	runGit(t, root, "add", "staged.go")
+	runner.Refresh()
+	waitForTestRunner(t, runner)
+	if len(runner.State().Suites[0].History) != 1 {
+		t.Fatalf("staging did not start tests: %#v", runner.State())
+	}
+
+	runGit(t, root, "reset", "HEAD", "staged.go")
+	runner.Refresh()
+	time.Sleep(20 * time.Millisecond)
+	if len(runner.State().Suites[0].History) != 1 {
+		t.Fatal("unstaging triggered another test run")
+	}
+}
+
+func waitForTestRunner(t *testing.T, runner *TestRunner) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for runner.State().Status == "running" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if runner.State().Status == "running" {
+		t.Fatal("test runner did not finish")
+	}
+}
+
 func TestPHPUnitFrameworkParsesSummary(t *testing.T) {
 	output := []byte("Tests: 5, Assertions: 5, Failures: 1.\n")
 	results, _ := (phpUnitFramework{}).parse(output)

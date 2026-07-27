@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -83,6 +84,35 @@ func TestRunTestsRejectsUnsupportedProject(t *testing.T) {
 
 	if response.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusConflict)
+	}
+}
+
+func TestTestSettingsEndpointUpdatesSuite(t *testing.T) {
+	root := t.TempDir()
+	writeServerTestFile(t, filepath.Join(root, "go.mod"), "module example.com/project\n\ngo 1.26\n")
+	handler := New(project.NewScanner(root))
+	stateRequest := httptest.NewRequest(http.MethodGet, "/api/tests", nil)
+	stateResponse := httptest.NewRecorder()
+	handler.ServeHTTP(stateResponse, stateRequest)
+	var state project.TestState
+	if err := json.NewDecoder(stateResponse.Body).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+
+	body := fmt.Sprintf(`{"suiteId":%q,"mode":"idle","idleSeconds":45}`, state.Suites[0].ID)
+	request := httptest.NewRequest(http.MethodPost, "/api/tests/settings", bytes.NewBufferString(body))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+	var updated project.TestState
+	if err := json.NewDecoder(response.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Suites[0].AutoMode != "idle" || updated.Suites[0].IdleSeconds != 45 {
+		t.Fatalf("updated suite = %#v", updated.Suites[0])
 	}
 }
 

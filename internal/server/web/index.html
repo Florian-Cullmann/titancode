@@ -203,6 +203,16 @@
               <div id="test-suites-list" class="test-suites-list">
                 <div class="empty-state">Test-Suites werden erkannt …</div>
               </div>
+              <div id="auto-test-settings" class="auto-test-settings view-hidden">
+                <div><strong>Automatische Ausführung</strong><small id="auto-test-status">Manuelle Ausführung</small></div>
+                <select id="auto-test-mode" aria-label="Automatische Testausführung">
+                  <option value="manual">Nur manuell</option>
+                  <option value="idle">Nach Inaktivität</option>
+                  <option value="staged">Nach dem Stagen</option>
+                </select>
+                <label id="idle-delay-setting"><input id="auto-test-delay" type="number" min="5" max="3600" value="30"> Sekunden</label>
+                <button id="save-auto-test" class="secondary-button" type="button">Speichern</button>
+              </div>
             </article>
 
             <article class="panel test-results">
