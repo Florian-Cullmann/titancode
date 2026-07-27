@@ -229,6 +229,18 @@ h1 { margin: 0; font-size: 24px; letter-spacing: -.55px; font-weight: 650; }
 .test-metrics strong, .test-metrics small { display: block; }
 .test-metrics strong { font-size: 22px; }
 .test-metrics small { margin-top: 7px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+.test-suites-list { padding: 6px 12px 12px; border-top: 1px solid var(--border-soft); }
+.test-suite { width: 100%; min-height: 72px; padding: 10px 8px; display: grid; grid-template-columns: 24px minmax(0, 1fr) 90px 62px; gap: 10px; align-items: center; color: inherit; text-align: left; background: transparent; border: 1px solid transparent; border-bottom-color: var(--border-soft); cursor: pointer; }
+.test-suite:last-child { border-bottom-color: transparent; }
+.test-suite:hover { background: #0f1f2a; }
+.test-suite.active { background: #102330; border-color: #1d455b; border-radius: 6px; }
+.test-suite-main { min-width: 0; display: grid; gap: 3px; }
+.test-suite-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.test-suite-main small { color: var(--muted); font-size: 9px; }
+.test-suite-main code { overflow: hidden; color: var(--faint); text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+.test-suite-state { color: var(--muted); font-size: 10px; text-align: right; }
+.suite-run { padding: 6px 7px; color: #8bd4f8; background: #102a3a; border: 1px solid #1d536e; border-radius: 5px; font-size: 9px; text-align: center; }
+.suite-run:hover { color: white; border-color: #2c7698; }
 .test-packages-list { min-height: 180px; padding: 6px 12px 12px; }
 .test-package { min-height: 48px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 9px; align-items: center; border-bottom: 1px solid var(--border-soft); }
 .test-package:last-child { border-bottom: 0; }
@@ -260,6 +272,8 @@ h1 { margin: 0; font-size: 24px; letter-spacing: -.55px; font-weight: 650; }
   .review-workspace { grid-template-columns: 1fr; }
   .test-workspace { grid-template-columns: 1fr; }
   .test-overview { grid-column: auto; }
+  .test-suite { grid-template-columns: 24px minmax(0, 1fr) 62px; }
+  .test-suite-state { display: none; }
   .review-files-list { max-height: 240px; }
   .diff-toolbar { align-items: flex-start; flex-direction: column; }
 }

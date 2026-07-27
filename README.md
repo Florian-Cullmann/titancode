@@ -32,7 +32,9 @@ layer that stays useful alongside any CLI-based agent.
 - Git branch, working-tree status, and diff statistics
 - unified review for working-tree and staged changes
 - per-file stage and unstage actions
-- Go, Python unittest, and PHPUnit discovery, execution, results, and failure output
+- multi-suite test discovery for nested and mixed-language repositories
+- Go, Python unittest, PHPUnit, and JavaScript/TypeScript test execution
+- independent suite results, runtimes, cancellation, and failure output
 - repository areas grouped by file and code size
 - language distribution and source-file statistics
 - `.gitignore`-aware scanning

@@ -66,12 +66,22 @@ func (s *Server) cancelTests(writer http.ResponseWriter, request *http.Request) 
 	s.testAction(writer, request, s.tester.Cancel)
 }
 
-func (s *Server) testAction(writer http.ResponseWriter, request *http.Request, action func() error) {
+func (s *Server) testAction(writer http.ResponseWriter, request *http.Request, action func(string) error) {
 	if !sameOrigin(request) {
 		writeError(writer, http.StatusForbidden, errors.New("cross-origin request rejected"))
 		return
 	}
-	if err := action(); err != nil {
+	var payload struct {
+		SuiteID string `json:"suiteId"`
+	}
+	request.Body = http.MaxBytesReader(writer, request.Body, 4096)
+	if request.Body != nil && request.ContentLength != 0 {
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			writeError(writer, http.StatusBadRequest, errors.New("invalid request body"))
+			return
+		}
+	}
+	if err := action(payload.SuiteID); err != nil {
 		writeError(writer, http.StatusConflict, err)
 		return
 	}
@@ -208,6 +218,7 @@ func (s *Server) refresh(ctx context.Context) {
 		log.Printf("scan failed: %v", err)
 		return
 	}
+	s.tester.Refresh()
 	payload, _ := json.Marshal(snapshot)
 	sum := sha256.Sum256(payload)
 	hash := hex.EncodeToString(sum[:])

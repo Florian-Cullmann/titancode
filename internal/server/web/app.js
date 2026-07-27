@@ -9,6 +9,7 @@ const state = {
   selectedPath: new URLSearchParams(location.search).get("file"),
   mode: "working",
   filter: "all",
+  selectedTestSuite: null,
 };
 
 function escapeHTML(value) {
@@ -366,9 +367,14 @@ async function fetchTestState() {
 }
 
 function renderTestState(testState) {
-  const packages = testState.packages ?? [];
-  const passed = packages.filter(item => item.status === "pass").length;
-  const failed = packages.filter(item => item.status === "fail").length;
+  const suites = testState.suites ?? [];
+  if (!state.selectedTestSuite || !suites.some(suite => suite.id === state.selectedTestSuite)) {
+    state.selectedTestSuite = suites[0]?.id ?? null;
+  }
+  const selected = suites.find(suite => suite.id === state.selectedTestSuite);
+  const results = suites.flatMap(suite => suite.results ?? []);
+  const passed = results.filter(item => item.status === "pass").length;
+  const failed = results.filter(item => item.status === "fail").length;
   const running = testState.status === "running";
   const statusLabels = {
     idle: "Bereit", running: "Läuft", passed: "Erfolgreich", failed: "Fehlgeschlagen",
@@ -376,37 +382,83 @@ function renderTestState(testState) {
   };
   $("#test-status").className = `test-status ${testState.status}`;
   $("#test-status").textContent = statusLabels[testState.status] ?? testState.status;
-  $("#test-command").textContent = testState.command || "Kein unterstütztes Test-Framework erkannt";
-  $("#test-summary").textContent = !testState.available
-    ? "Für dieses Repository wurde noch kein unterstütztes Test-Framework erkannt."
+  $("#test-command").textContent = suites.length
+    ? `${suites.length} ${suites.length === 1 ? "Suite wurde" : "Suites wurden"} im Repository erkannt`
+    : "Keine ausführbare Testkonfiguration gefunden";
+  $("#test-summary").textContent = !suites.length
+    ? "Für dieses Repository wurde noch keine unterstützte Test-Suite erkannt."
     : running
-      ? "Die Tests werden ausgeführt …"
-      : testState.finishedAt
-        ? `Letzter Lauf ${relativeTime(new Date(testState.finishedAt))}.`
-        : `${testState.framework} wurde erkannt und kann gestartet werden.`;
-  $("#test-packages").textContent = testState.finishedAt ? number.format(packages.length) : "—";
-  $("#test-passed").textContent = testState.finishedAt ? number.format(passed) : "—";
-  $("#test-failed").textContent = testState.finishedAt ? number.format(failed) : "—";
-  $("#test-duration").textContent = testState.finishedAt ? formatDuration(testState.durationMs) : "—";
-  $("#run-tests").disabled = !testState.available || running;
-  $("#run-tests").textContent = testState.finishedAt ? "Erneut ausführen" : "Tests starten";
+      ? "Mindestens eine Test-Suite wird ausgeführt …"
+      : `${suites.length} ${suites.length === 1 ? "Suite ist" : "Suites sind"} bereit.`;
+  $("#test-packages").textContent = results.length ? number.format(results.length) : "—";
+  $("#test-passed").textContent = results.length ? number.format(passed) : "—";
+  $("#test-failed").textContent = results.length ? number.format(failed) : "—";
+  const duration = Math.max(0, ...suites.map(suite => suite.durationMs ?? 0));
+  $("#test-duration").textContent = duration ? formatDuration(duration) : "—";
+  $("#run-tests").disabled = !suites.length || running;
+  $("#run-tests").textContent = suites.some(suite => suite.finishedAt) ? "Alle erneut ausführen" : "Alle Tests starten";
   $("#cancel-tests").classList.toggle("view-hidden", !running);
-  $("#test-packages-list").innerHTML = packages.length
-    ? packages.map(item => `
+  $("#test-suites-list").innerHTML = suites.length
+    ? suites.map(suite => `
+      <button class="test-suite ${suite.id === state.selectedTestSuite ? "active" : ""}" type="button" data-suite-id="${escapeHTML(suite.id)}">
+        <span class="test-result-icon ${suiteStatusIcon(suite.status)}">${suiteStatusSymbol(suite.status)}</span>
+        <span class="test-suite-main">
+          <strong>${escapeHTML(suite.name)}</strong>
+          <small>${escapeHTML(suite.path)} · ${escapeHTML(suite.framework)}</small>
+          <code>${escapeHTML(suite.command)}</code>
+        </span>
+        <span class="test-suite-state">${statusLabels[suite.status] ?? suite.status}</span>
+        <span class="suite-run" role="button" tabindex="0" data-run-suite="${escapeHTML(suite.id)}">${suite.status === "running" ? "Läuft …" : "Starten"}</span>
+      </button>`).join("")
+    : `<div class="empty-state">Keine unterstützten Test-Suites erkannt</div>`;
+  $$("[data-suite-id]").forEach(element => {
+    element.addEventListener("click", () => {
+      state.selectedTestSuite = element.dataset.suiteId;
+      renderTestState(testState);
+    });
+  });
+  $$("[data-run-suite]").forEach(element => {
+    element.addEventListener("click", event => {
+      event.stopPropagation();
+      testAction("run", element.dataset.runSuite);
+    });
+  });
+  const selectedResults = selected?.results ?? [];
+  $("#test-packages-list").innerHTML = selectedResults.length
+    ? selectedResults.map(item => `
       <div class="test-package">
         <span class="test-result-icon ${item.status}">${item.status === "pass" ? "✓" : item.status === "skip" ? "−" : "×"}</span>
         <strong>${escapeHTML(item.name)}</strong>
         <span>${formatDuration(item.durationMs)}</span>
       </div>`).join("")
-    : `<div class="empty-state">${running ? "Testergebnisse werden gesammelt …" : "Noch keine Tests ausgeführt"}</div>`;
-  $("#test-output").textContent = testState.output || testState.error || "Noch keine Ausgabe vorhanden.";
+    : `<div class="empty-state">${selected?.status === "running" ? "Testergebnisse werden gesammelt …" : "Noch keine Ergebnisse für diese Suite"}</div>`;
+  $("#test-output").textContent = selected?.output || selected?.error || "Noch keine Ausgabe für diese Suite vorhanden.";
 }
 
-async function testAction(action) {
+function suiteStatusIcon(status) {
+  if (status === "passed") return "pass";
+  if (status === "failed" || status === "timeout") return "fail";
+  if (status === "canceled") return "skip";
+  return "";
+}
+
+function suiteStatusSymbol(status) {
+  if (status === "passed") return "✓";
+  if (status === "failed" || status === "timeout") return "×";
+  if (status === "running") return "…";
+  if (status === "canceled") return "−";
+  return "○";
+}
+
+async function testAction(action, suiteId = "") {
   const button = action === "run" ? $("#run-tests") : $("#cancel-tests");
   button.disabled = true;
   try {
-    const response = await fetch(`/api/tests/${action}`, { method: "POST" });
+    const response = await fetch(`/api/tests/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ suiteId }),
+    });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Testaktion fehlgeschlagen");
     renderTestState(payload);

@@ -70,7 +70,7 @@ func TestTestStateEndpointDetectsGoProject(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&state); err != nil {
 		t.Fatal(err)
 	}
-	if !state.Available || state.Framework != "Go" {
+	if len(state.Suites) != 1 || state.Suites[0].Framework != "Go" {
 		t.Fatalf("unexpected state: %#v", state)
 	}
 }

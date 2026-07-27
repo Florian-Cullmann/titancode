@@ -14,14 +14,14 @@ func TestRunnerDetectsGoProject(t *testing.T) {
 	}
 
 	state := NewTestRunner(root).State()
-	if !state.Available || state.Framework != "Go" || state.Status != "idle" {
+	if len(state.Suites) != 1 || state.Suites[0].Framework != "Go" || state.Status != "idle" {
 		t.Fatalf("unexpected state: %#v", state)
 	}
 }
 
 func TestRunnerLeavesUnsupportedProjectUnavailable(t *testing.T) {
 	state := NewTestRunner(t.TempDir()).State()
-	if state.Available {
+	if len(state.Suites) != 0 {
 		t.Fatalf("unexpected available state: %#v", state)
 	}
 }
@@ -59,11 +59,11 @@ func TestRunnerDetectsPythonProjectAndVirtualEnvironment(t *testing.T) {
 	writeTestFile(t, python, "")
 
 	state := NewTestRunner(root).State()
-	if !state.Available || state.Framework != "Python unittest" {
+	if len(state.Suites) != 1 || state.Suites[0].Framework != "Python unittest" {
 		t.Fatalf("unexpected state: %#v", state)
 	}
-	if !strings.Contains(state.Command, ".venv/bin/python -m unittest discover -s tests -p test_*.py -v") {
-		t.Fatalf("command = %q", state.Command)
+	if !strings.Contains(state.Suites[0].Command, ".venv/bin/python -m unittest discover -s tests -p test_*.py -v") {
+		t.Fatalf("command = %q", state.Suites[0].Command)
 	}
 }
 
@@ -72,7 +72,7 @@ func TestRunnerDoesNotOfferPythonTestsWithoutTestFiles(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "requirements.txt"), "fastapi\n")
 
 	state := NewTestRunner(root).State()
-	if state.Available {
+	if len(state.Suites) != 0 {
 		t.Fatalf("unexpected available state: %#v", state)
 	}
 }
@@ -94,11 +94,69 @@ func TestRunnerDetectsPHPUnitProject(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "composer.json"), `{"require-dev":{"phpunit/phpunit":"^11"}}`)
 
 	state := NewTestRunner(root).State()
-	if !state.Available || state.Framework != "PHPUnit" {
+	if len(state.Suites) != 1 || state.Suites[0].Framework != "PHPUnit" {
 		t.Fatalf("unexpected state: %#v", state)
 	}
-	if state.Command != "phpunit --testdox --colors=never" {
-		t.Fatalf("command = %q", state.Command)
+	if state.Suites[0].Command != "phpunit --testdox --colors=never" {
+		t.Fatalf("command = %q", state.Suites[0].Command)
+	}
+}
+
+func TestRunnerDiscoversMultipleNestedSuites(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "go.mod"), "module example.com/root\n")
+	writeTestFile(t, filepath.Join(root, "frontend", "package.json"), `{"scripts":{"test":"vitest"}}`)
+	writeTestFile(t, filepath.Join(root, "api", "composer.json"), `{"require-dev":{"phpunit/phpunit":"^11"}}`)
+
+	state := NewTestRunner(root).State()
+	if len(state.Suites) != 3 {
+		t.Fatalf("suites = %#v", state.Suites)
+	}
+	frameworks := []string{state.Suites[0].Framework, state.Suites[1].Framework, state.Suites[2].Framework}
+	if strings.Join(frameworks, ",") != "Go,PHPUnit,JavaScript / TypeScript" {
+		t.Fatalf("frameworks = %v", frameworks)
+	}
+}
+
+func TestJavaScriptFrameworkRequiresTestScript(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "package.json"), `{"scripts":{"check":"svelte-check"}}`)
+	if (javaScriptTestFramework{}).detect(root) {
+		t.Fatal("project without test script was detected")
+	}
+	writeTestFile(t, filepath.Join(root, "package.json"), `{"scripts":{"test":"vitest run"}}`)
+	if !(javaScriptTestFramework{}).detect(root) {
+		t.Fatal("project with test script was not detected")
+	}
+}
+
+func TestRunnerRefreshesSuitesWithoutLosingResults(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "go.mod"), "module example.com/root\n")
+	runner := NewTestRunner(root)
+	goID := runner.State().Suites[0].ID
+
+	runner.mu.Lock()
+	runner.suites[goID].suite.Status = "passed"
+	runner.suites[goID].suite.Results = []TestResult{{Name: "example.com/root", Status: "pass"}}
+	runner.mu.Unlock()
+
+	writeTestFile(t, filepath.Join(root, "frontend", "package.json"), `{"scripts":{"test":"vitest run"}}`)
+	runner.Refresh()
+	state := runner.State()
+	if len(state.Suites) != 2 {
+		t.Fatalf("suites after addition = %#v", state.Suites)
+	}
+	if state.Suites[0].Status != "passed" || len(state.Suites[0].Results) != 1 {
+		t.Fatalf("existing result was lost: %#v", state.Suites[0])
+	}
+
+	if err := os.Remove(filepath.Join(root, "frontend", "package.json")); err != nil {
+		t.Fatal(err)
+	}
+	runner.Refresh()
+	if suites := runner.State().Suites; len(suites) != 1 {
+		t.Fatalf("suites after removal = %#v", suites)
 	}
 }
 
